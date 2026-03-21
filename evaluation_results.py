@@ -14,10 +14,7 @@ from matplotlib import colormaps
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from retrieval_database import find_all_file, get_encoding_of_file
-try:
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-except ImportError:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import TextLoader
 
 """
@@ -402,7 +399,7 @@ def evaluate_target(sources, outputs, contexts, target_content):
     num_effect_prompt = 0
     extract_public_context = []
     num_prompt = len(outputs)
-    k = len(sources) // len(outputs)
+    k = len(contexts) // len(outputs)
     for i in range(num_prompt):
         output = outputs[i].strip()
         context_k = contexts[i * k:i * k + k]
@@ -458,7 +455,7 @@ def evaluate_repeat(sources, outputs, contexts, min_repeat_num=20, repeat_conten
     num_effective_prompt = 0  # number of effective prompt
     avg_effective_length = 0  # average length of effective part of the prompt
     num_extract_context = []  # source of succeed extracted contexts (no-repeat)
-    k = len(sources) // len(outputs)
+    k = len(contexts) // len(outputs)
 
     all_disease = None
     num_true_disease = 0
@@ -540,11 +537,11 @@ def evaluate_rouge(sources, outputs, contexts, threshold=0.5, rouge_lst=None):
     num_prompt = len(outputs)  # number of input prompt
     num_effective_prompt = 0  # number of effective prompt
     num_extract_context = []  # source of succeed extracted contexts (no-repeat)
-    k = len(sources) // len(outputs)
+    k = len(contexts) // len(outputs)
     all_disease = None
     num_true_disease = 0
     if "true disease" in rouge_lst:
-        with open('Information/Target_Disease.txt', 'r', encoding='utf-8') as file:
+        with open('Information/Target_Disease.json', 'r', encoding='utf-8') as file:
             all_disease = json.load(file)
     for i in range(num_prompt):
         flag_true_disease = 0

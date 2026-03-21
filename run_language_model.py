@@ -42,18 +42,38 @@ def find_lambda_bisection(p_priv, p_pub, alpha, max_div, max_iter=20, tol=1e-5):
 
 def get_safe_context(text, model, tokenizer, device):
     messages = [
-        {"role": "system", "content": "You are a privacy anonymization engine. Extract sensitive entities (names, hospitals, specific diseases, exact amounts, etc.) from the text. Generalize them to Intermediate-level Semantic Categories.\nFor example: 'John' -> '[PERSON]', 'Type-2 Diabetes' -> '[CHRONIC_METABOLIC_DISEASE]'. Do NOT use overly broad tags like [DISEASE] or [NUMBER].\nOutput MUST be a valid JSON array of objects: [{\"entity\": \"exact_word\", \"type\": \"[TAG]\"}]. NO other text."},
+        {"role": "system", "content": """You are a high-precision privacy anonymization engine. 
+Your task is to identify and generalize ALL sensitive and specific entities in the provided text to maintain privacy while preserving semantic meaning.
+
+EXTRACT AND GENERALIZE:
+1. Personal Identifiers: Names, Emails, Phone numbers, Addresses, Social IDs.
+2. Technical & Domain-Specific Data: Specific clinical tests, lab values, specialized equipment, unique project names, or proprietary technical parameters.
+3. Specific Conditions or Topics: Detailed disease names, unique symptoms, or specific technical diagnoses.
+4. Organizations & Locations: Hospitals, Clinics, Companies, specific cities.
+
+GENERALIZATION RULES:
+- Map entities to 'Intermediate-level Semantic Categories'.
+- Examples: 
+  'John Smith' -> '[PERSON]'
+  'St. Jude Hospital' -> '[MEDICAL_INSTITUTION]'
+  'blood creatinine' -> '[CLINICAL_TEST]'
+  '88 mg/dL' -> '[QUANTITATIVE_VALUE]'
+  'Project Alpha' -> '[PROJECT_NAME]'
+
+Output MUST be a valid JSON array of objects: [{"entity": "exact_word", "type": "[TAG]"}]. 
+Provide ONLY the JSON array. Do not include any introductory or concluding text."""},
+        {"role": "user", "content": "Text: Contact John regarding the Project X report. The GFR test at City Hospital showed 45 mL/min."},
+        {"role": "assistant", "content": '[{"entity": "John", "type": "[PERSON]"}, {"entity": "Project X", "type": "[PROJECT_NAME]"}, {"entity": "GFR", "type": "[CLINICAL_TEST]"}, {"entity": "City Hospital", "type": "[MEDICAL_INSTITUTION]"}, {"entity": "45 mL/min", "type": "[QUANTITATIVE_VALUE]"}]'},
         {"role": "user", "content": f"Text: {text}"}
     ]
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     except Exception:
-        prompt = f"System: {messages[0]['content']}\n\nUser: {messages[1]['content']}\n\nAssistant:\n"
+        prompt = f"System: {messages[0]['content']}\n\nUser: {messages[1]['content']}\n\nAssistant: {messages[2]['content']}\n\nUser: {messages[3]['content']}\n\nAssistant:\n"
     
     prompt += "["
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
-        # Removed temperature to prevent HF warnings when do_sample=False (Greedy Decoding)
         outputs = model.generate(**inputs, max_new_tokens=500, do_sample=False, pad_token_id=tokenizer.eos_token_id)
     resp = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
     
