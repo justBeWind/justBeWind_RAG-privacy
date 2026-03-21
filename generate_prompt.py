@@ -10,7 +10,13 @@ It contains functions:
 Note that all the parameters are set in __main__
 """
 from retrieval_database import load_retrieval_database_from_parameter, find_all_file, get_encoding_of_file
+
+# Inject monkey-patch to bypass FlagEmbedding's legacy crash on modern transformers
+import transformers.utils.import_utils
+if not hasattr(transformers.utils.import_utils, 'is_torch_fx_available'):
+    transformers.utils.import_utils.is_torch_fx_available = lambda: False
 from FlagEmbedding import FlagReranker
+
 import os
 import json
 import re
