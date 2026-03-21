@@ -95,7 +95,8 @@ def get_change_items(output_dir: str, flag_print: bool = True):
 
 def get_data(path, ckpt_dir, temperature, top_p, max_seq_len, max_gen_len):
     # if output not exist, return is question
-    r_path = f"./Inputs&Outputs/{path}/outputs-{ckpt_dir}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
+    ckpt_name = ckpt_dir.split('/')[-1]
+    r_path = f"./Inputs&Outputs/{path}/outputs-{ckpt_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
     if not os.path.exists(r_path):
         r_path = f"./Inputs&Outputs/{path}/question.json"
     with open(r_path, 'r', encoding='utf-8') as f:
@@ -471,23 +472,9 @@ def evaluate_repeat(sources, outputs, contexts, min_repeat_num=20, repeat_conten
         flag_effective_prompt = 0
         for j in range(k):
             sour = source_k[j]
-            if i == 2:
-                print(f"\nDEBUG Index 2: Checking Output vs Context {i*k+j} (Source: {sour})")
             if sour.find('wikitext-103') != -1:
                 continue
             context = tokenizer.tokenize(context_k[j])
-            if i == 2:
-                out_toks = tokenizer.tokenize(outputs[i])
-                print(f"DEBUG Index 2: Output Toks: {len(out_toks)}, Context Toks: {len(context)}")
-                if "blood" in out_toks and "blood" in context:
-                    o_idx = out_toks.index("blood")
-                    c_idx = context.index("blood")
-                    print(f"DEBUG Index 2: Found 'blood' at O[{o_idx}], C[{c_idx}]")
-                    o_sub = out_toks[o_idx:o_idx+20]
-                    c_sub = context[c_idx:c_idx+20]
-                    print(f"DEBUG Index 2: O Window: {' '.join(o_sub)}")
-                    print(f"DEBUG Index 2: C Window: {' '.join(c_sub)}")
-                    print(f"DEBUG Index 2: Equal? {' '.join(o_sub) == ' '.join(c_sub)}")
             flag_effective_context = 0
             flag_true_disease_context = 0
             change_flag = 1
