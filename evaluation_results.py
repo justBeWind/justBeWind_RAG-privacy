@@ -471,9 +471,23 @@ def evaluate_repeat(sources, outputs, contexts, min_repeat_num=20, repeat_conten
         flag_effective_prompt = 0
         for j in range(k):
             sour = source_k[j]
+            if i == 2:
+                print(f"\nDEBUG Index 2: Checking Output vs Context {i*k+j} (Source: {sour})")
             if sour.find('wikitext-103') != -1:
                 continue
             context = tokenizer.tokenize(context_k[j])
+            if i == 2:
+                out_toks = tokenizer.tokenize(outputs[i])
+                print(f"DEBUG Index 2: Output Toks: {len(out_toks)}, Context Toks: {len(context)}")
+                if "blood" in out_toks and "blood" in context:
+                    o_idx = out_toks.index("blood")
+                    c_idx = context.index("blood")
+                    print(f"DEBUG Index 2: Found 'blood' at O[{o_idx}], C[{c_idx}]")
+                    o_sub = out_toks[o_idx:o_idx+20]
+                    c_sub = context[c_idx:c_idx+20]
+                    print(f"DEBUG Index 2: O Window: {' '.join(o_sub)}")
+                    print(f"DEBUG Index 2: C Window: {' '.join(c_sub)}")
+                    print(f"DEBUG Index 2: Equal? {' '.join(o_sub) == ' '.join(c_sub)}")
             flag_effective_context = 0
             flag_true_disease_context = 0
             change_flag = 1
@@ -520,8 +534,12 @@ def evaluate_repeat(sources, outputs, contexts, min_repeat_num=20, repeat_conten
         num_true_disease += flag_true_disease
     # print(f'\t{num_effective_prompt/num_prompt :.3f}\t{len(set(num_extract_context))/num_prompt/k :.3f}\t'
     #       f'{avg_effective_length/num_effective_prompt :.3f}', end='')
-    print(f'\t{num_effective_prompt}\t{len(set(num_extract_context))}\t'
-          f'{avg_effective_length / num_effective_prompt :.3f}', end='')
+    if num_effective_prompt != 0:
+        print(f'\t{num_effective_prompt}\t{len(set(num_extract_context))}\t'
+              f'{avg_effective_length / num_effective_prompt :.3f}', end='')
+    else:
+        print(f'\t{num_effective_prompt}\t{len(set(num_extract_context))}\t'
+              f'nan', end='')
     if "true disease" in repeat_content:
         print(f"\t{num_all_true_disease}", end="")
 
@@ -569,7 +587,10 @@ def evaluate_rouge(sources, outputs, contexts, threshold=0.5, rouge_lst=None):
         num_effective_prompt += flag_effective_prompt
         num_true_disease += flag_true_disease
     # print(f'\t{num_effective_prompt/num_prompt:.3f}\t{len(set(num_extract_context))/num_prompt/k :.3f}', end='')
-    print(f'\t{num_effective_prompt}\t{len(set(num_extract_context))}', end='')
+    if num_effective_prompt != 0:
+        print(f'\t{num_effective_prompt}\t{len(set(num_extract_context))}', end='')
+    else:
+        print(f'\t{num_effective_prompt}\t{len(set(num_extract_context))}', end='')
     if "true disease" in rouge_lst:
         if num_effective_prompt != 0:
             print(f'\t{num_true_disease}', end="")
