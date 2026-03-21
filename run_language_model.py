@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import re
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import time
+from tqdm import tqdm
 
 def compute_renyi_divergence(p, q, alpha=2.0, eps=1e-10):
     p = p.float().clamp_min(eps)
@@ -47,31 +48,36 @@ def get_safe_context(text, model, tokenizer, device):
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     except Exception:
-        # Fallback for older models without explicit chat template
         prompt = f"System: {messages[0]['content']}\n\nUser: {messages[1]['content']}\n\nAssistant:\n"
     
-    prompt += "["  # Force the LLM to output a JSON array
+    prompt += "["
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=150, temperature=0.1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+        outputs = model.generate(**inputs, max_new_tokens=500, temperature=0.1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
     resp = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
     
-    # Prepend the missing bracket because we forced it in the prompt
     resp = "[" + resp
-    
     safe_text = text
-    try:
-        json_str = re.search(r'\[.*\]', resp, re.DOTALL).group()
-        entities = json.loads(json_str)
-        print(f"[AUDIT C-Module] Found entities to generalize: {entities}", flush=True)
-        for ent in entities:
+    found_entities = []
+    
+    for match in re.finditer(r'\{[^{}]*\}', resp):
+        try:
+            d_str = match.group().replace("'", '"')
+            ent = json.loads(d_str)
             if isinstance(ent, dict) and 'entity' in ent and 'type' in ent:
-                safe_text = safe_text.replace(str(ent['entity']), str(ent['type']))
-    except Exception as e:
-        print(f"[AUDIT C-Module Warning] JSON parsing failed: {resp}")
-        print("[AUDIT C-Module Warning] Fallback: Heavily redacting context to ensure Absolute DP Guarantee.", flush=True)
+                found_entities.append(ent)
+        except Exception:
+            pass
+            
+    if found_entities:
+        print(f"\n[AUDIT C-Module] Found entities to generalize: {found_entities}", flush=True)
+        for ent in found_entities:
+            safe_text = safe_text.replace(str(ent['entity']), str(ent['type']))
+    else:
+        print(f"\n[AUDIT C-Module Warning] JSON parsing entirely failed. Fallback to Full Redaction.", flush=True)
         safe_text = "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]"
-    return safe_text
+        
+    return safe_text, found_entities
 
 def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=2.0, max_div=1.0):
     eos_id = tokenizer.eos_token_id
@@ -79,9 +85,12 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
     input_priv = tokenizer(prompt_priv, return_tensors="pt").input_ids.to(device)
     input_pub = tokenizer(prompt_pub, return_tensors="pt").input_ids.to(device)
     
+    attention_mask_priv = torch.ones_like(input_priv)
+    attention_mask_pub = torch.ones_like(input_pub)
+    
     with torch.no_grad():
-        out_priv = model(input_ids=input_priv, use_cache=True)
-        out_pub = model(input_ids=input_pub, use_cache=True)
+        out_priv = model(input_ids=input_priv, attention_mask=attention_mask_priv, use_cache=True)
+        out_pub = model(input_ids=input_pub, attention_mask=attention_mask_pub, use_cache=True)
         
     past_priv = out_priv.past_key_values
     past_pub = out_pub.past_key_values
@@ -101,7 +110,6 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
         lam, div = find_lambda_bisection(p_priv, p_pub, alpha, max_div)
         p_mixed = lam * p_priv + (1.0 - lam) * p_pub
         
-        # Greedy search for deterministic stability in attacks
         next_token = torch.argmax(p_mixed, dim=-1).unsqueeze(0)
         
         generated_tokens.append(next_token.item())
@@ -110,9 +118,12 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
         if next_token.item() == eos_id:
             break
             
+        attention_mask_priv = torch.cat([attention_mask_priv, torch.ones((1, 1), device=device, dtype=torch.long)], dim=1)
+        attention_mask_pub = torch.cat([attention_mask_pub, torch.ones((1, 1), device=device, dtype=torch.long)], dim=1)
+            
         with torch.no_grad():
-            out_priv = model(input_ids=next_token, past_key_values=past_priv, use_cache=True)
-            out_pub = model(input_ids=next_token, past_key_values=past_pub, use_cache=True)
+            out_priv = model(input_ids=next_token, past_key_values=past_priv, attention_mask=attention_mask_priv, use_cache=True)
+            out_pub = model(input_ids=next_token, past_key_values=past_pub, attention_mask=attention_mask_pub, use_cache=True)
             
         past_priv = out_priv.past_key_values
         past_pub = out_pub.past_key_values
@@ -163,33 +174,47 @@ def main(
         suf, adhesive, prefix_len, end_marker = None, None, 0, None
     
     answer_log = []
+    audit_log = []
+    ckpt_safe_name = ckpt_dir.split('/')[-1]
+    out_name = f"{inputs_dir}/outputs-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
+    audit_name = f"{inputs_dir}/audit-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
     
-    for i, prompt_priv in enumerate(all_prompts):
-        print(f"\n=== Processing Prompt {i+1}/{len(all_prompts)} ===", flush=True)
+    for i, prompt_priv in tqdm(enumerate(all_prompts), total=len(all_prompts), desc="DP-RAG Pipeline"):
         
         if end_marker and (end_idx := prompt_priv.find(end_marker, prefix_len)) != -1:
             context_str = prompt_priv[prefix_len:end_idx]
-            print(f"[C-Module] Isolated RAG context. Length: {len(context_str)} characters.", flush=True)
-            safe_context = get_safe_context(context_str, model, tokenizer, device)
+            safe_context, c_entities = get_safe_context(context_str, model, tokenizer, device)
             prompt_pub = prompt_priv.replace(context_str, safe_context)
         else:
-            print(f"[C-Module] Isolated context not securely found. Running C-module on entire prompt.", flush=True)
-            prompt_pub = get_safe_context(prompt_priv, model, tokenizer, device)
+            prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
             
         start_time = time.time()
         ans, avg_lam = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
         end_time = time.time()
         
-        print(f"[B-Module Output] Length: {len(ans)} chars. Avg Fusion Lambda: {avg_lam:.4f}. Generation Time: {end_time - start_time:.2f}s", flush=True)
+        gen_time = end_time - start_time
+        print(f"\n[B-Module Output #{i+1}] Length: {len(ans)} chars. Fusion Weight Lambda: {avg_lam:.4f}. Generation Time: {gen_time:.2f}s", flush=True)
         answer_log.append(ans)
         
-    ckpt_safe_name = ckpt_dir.split('/')[-1] # Ensure safe save path
-    out_name = f"./Inputs&Outputs/{path}/outputs-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
-    
-    with open(out_name, 'w', encoding='utf-8') as file:
-        file.write(json.dumps(answer_log))
+        # Incrementally log the Global Audit state
+        # Enhancing snapshot with specific module status flags as per rigorous ablation requirements
+        audit_log.append({
+            "prompt_index": i + 1,
+            "c_module_status": "SUCCESS" if c_entities else "FALLBACK_REDACTED",
+            "c_module_entities_extracted": len(c_entities) if c_entities else 0,
+            "c_module_entities_details": c_entities,
+            "b_module_fusion_lambda_avg": round(avg_lam, 4),
+            "b_module_output_length": len(ans),
+            "generation_time_sec": round(gen_time, 2)
+        })
         
-    print(f"\n[DONE] Successfully saved results to {out_name}", flush=True)
+        with open(out_name, 'w', encoding='utf-8') as file:
+            file.write(json.dumps(answer_log, ensure_ascii=False, indent=2))
+            
+        with open(audit_name, 'w', encoding='utf-8') as a_file:
+            a_file.write(json.dumps(audit_log, ensure_ascii=False, indent=2))
+        
+    print(f"\n[DONE] Successfully saved all results to {out_name}", flush=True)
 
 if __name__ == "__main__":
     fire.Fire(main)
