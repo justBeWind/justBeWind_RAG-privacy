@@ -452,17 +452,10 @@ def get_executable_file(settings_, output_dir_, output_list_, gpu_available, por
                     for max_seq_len in llm_set['max_seq_len']:
                         for max_gen_len in llm_set['max_gen_len']:
                             for opt in path:
-                                if model[8] == '7':
-                                    num_node = 1
-                                elif model[8:10] == '13':
-                                    num_node = 2
-                                else:
-                                    num_node = 1
-                                task = f'CUDA_VISIBLE_DEVICES={gpu_available} torchrun --nproc_per_node={num_node} ' \
-                                       + f'--master_port={port} run_language_model.py ' \
+                                # DP-RAG uses HF device_map=auto, torchrun is deprecated.
+                                task = f'CUDA_VISIBLE_DEVICES={gpu_available} python run_language_model.py ' \
                                        + f'--ckpt_dir {model} --temperature {tem} --top_p {top_p} ' \
-                                       + f'--max_seq_len {max_seq_len} --max_gen_len {max_gen_len} --path "{opt}" ;\n'
-                                port += 1
+                                       + f'--max_seq_len {max_seq_len} --max_gen_len {max_gen_len} --path "{opt}" --dp_alpha 2.0 --dp_beta 1.0;\n'
                                 f.write(task)
     settings_.update({'output_path': path})
     # store the settings
@@ -505,13 +498,13 @@ if __name__ == '__main__':
                              },
                 'template': {'suffix': [['context: ', 'question: ', 'answer:']],
                              'template_adhesive': ['\n']},
-                'LLM': {'LLM model': ['llama-2-7b-chat'],
+                'LLM': {'LLM model': ['meta-llama/Llama-2-7b-chat-hf'],
                         'temperature': [0.6],
                         'top_p': [0.9],
                         'max_seq_len': [4096],
                         'max_gen_len': [256]}
                 }
-    GPU_available = '3'
+    GPU_available = '0' # Default to GPU 0 for testing
     master_port = 27000
     # end setting parameters
     # generating the prompts
