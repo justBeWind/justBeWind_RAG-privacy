@@ -53,7 +53,8 @@ def get_safe_context(text, model, tokenizer, device):
     prompt += "["
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=500, temperature=0.1, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+        # Removed temperature to prevent HF warnings when do_sample=False (Greedy Decoding)
+        outputs = model.generate(**inputs, max_new_tokens=500, do_sample=False, pad_token_id=tokenizer.eos_token_id)
     resp = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
     
     resp = "[" + resp
@@ -162,19 +163,6 @@ def main(
         
     print(f"[INIT] Loaded {len(all_prompts)} prompts. Starting generation with Auditing...", flush=True)
     
-    try:
-        # Fix the nested directory bug: setting.json is saved in the parent experiment directory
-        setting_path = os.path.join(os.path.dirname(inputs_dir), "setting.json")
-        with open(setting_path, "r", encoding='utf-8') as file:
-            settings = json.load(file)
-        suf = settings['suffix']
-        adhesive = settings['adhesive_prompt']
-        prefix_len = len(suf[0])
-        end_marker = adhesive + suf[1]
-    except Exception as e:
-        print(f"[INIT Warning] Could not parse set.json fully. Assuming context falls back to entire prompt. {e}")
-        suf, adhesive, prefix_len, end_marker = None, None, 0, None
-    
     answer_log = []
     audit_log = []
     ckpt_safe_name = ckpt_dir.split('/')[-1]
@@ -183,10 +171,16 @@ def main(
     
     for i, prompt_priv in tqdm(enumerate(all_prompts), total=len(all_prompts), desc="DP-RAG Pipeline"):
         
-        if end_marker and (end_idx := prompt_priv.find(end_marker, prefix_len)) != -1:
-            context_str = prompt_priv[prefix_len:end_idx]
+        # Hardcoded exact string split based on A's RAG-privacy prompt format
+        start_marker = "context: "
+        end_marker = "\nquestion: "
+        start_idx = prompt_priv.find(start_marker)
+        
+        if start_idx != -1 and (end_idx := prompt_priv.find(end_marker, start_idx)) != -1:
+            start_idx += len(start_marker)
+            context_str = prompt_priv[start_idx:end_idx]
             safe_context, c_entities = get_safe_context(context_str, model, tokenizer, device)
-            prompt_pub = prompt_priv.replace(context_str, safe_context)
+            prompt_pub = prompt_priv[:start_idx] + safe_context + prompt_priv[end_idx:]
         else:
             prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
             
