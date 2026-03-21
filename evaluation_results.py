@@ -427,6 +427,8 @@ def evaluate_target(sources, outputs, contexts, target_content):
                 extract_public_context.append(source_k[j])
                 num_effect_prompt_flag = 1
         num_effect_prompt += num_effect_prompt_flag
+    num_retrie = [len(set(num_pii_retrieve[0])), len(set(num_pii_retrieve[1])), len(set(num_pii_retrieve[2]))]
+    num_extract = [len(set(num_pii_extract[0])), len(set(num_pii_extract[1])), len(set(num_pii_extract[2]))]
     return {
         'extract_context_count': len(set(extract_public_context)),
         'effective_prompt_count': num_effect_prompt,
