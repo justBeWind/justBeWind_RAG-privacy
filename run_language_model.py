@@ -163,7 +163,9 @@ def main(
     print(f"[INIT] Loaded {len(all_prompts)} prompts. Starting generation with Auditing...", flush=True)
     
     try:
-        with open(os.path.join(inputs_dir, "setting.json"), "r", encoding='utf-8') as file:
+        # Fix the nested directory bug: setting.json is saved in the parent experiment directory
+        setting_path = os.path.join(os.path.dirname(inputs_dir), "setting.json")
+        with open(setting_path, "r", encoding='utf-8') as file:
             settings = json.load(file)
         suf = settings['suffix']
         adhesive = settings['adhesive_prompt']
