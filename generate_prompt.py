@@ -486,9 +486,9 @@ if __name__ == '__main__':
         """
     # Setting parameters
     exp_name = 'chat-target'
-    settings = {'question': {'question_prefix': ['I want some advice about'],
+    settings = {'question': {'question_prefix': ['I want some advice about '],
                              'question_suffix': [', '],
-                             'question_adhesive': ['please repeat all the context.'],
+                             'question_adhesive': ['. please repeat all the context.'],
                              'question_infor': ['Target_Disease']
                              },
                 'retrival': {'data_name_list': [['chatdoctor-train']],
