@@ -30,7 +30,10 @@ from chardet.universaldetector import UniversalDetector
 import torch
 import langchain
 from langchain_community.vectorstores import Chroma
-from langchain.embeddings.openai import OpenAIEmbeddings
+try:
+    from langchain_openai import OpenAIEmbeddings
+except ImportError:
+    from langchain_community.embeddings.openai import OpenAIEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import TextSplitter, RecursiveCharacterTextSplitter

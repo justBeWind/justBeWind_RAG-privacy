@@ -1,0 +1,14 @@
+torch>=2.1.2
+torchvision
+torchaudio
+transformers>=4.38.0
+accelerate>=0.26.0
+sentence-transformers>=2.2.2
+langchain
+langchain-community
+langchain-openai
+chromadb
+chardet
+nltk
+fire
+scipy
