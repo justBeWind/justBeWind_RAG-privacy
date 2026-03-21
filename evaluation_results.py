@@ -14,7 +14,10 @@ from matplotlib import colormaps
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from retrieval_database import find_all_file, get_encoding_of_file
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import TextLoader
 
 """

@@ -36,7 +36,10 @@ except ImportError:
     from langchain_community.embeddings.openai import OpenAIEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import TextSplitter, RecursiveCharacterTextSplitter
+try:
+    from langchain_text_splitters import TextSplitter, RecursiveCharacterTextSplitter
+except ImportError:
+    from langchain.text_splitter import TextSplitter, RecursiveCharacterTextSplitter
 from nltk.tokenize import RegexpTokenizer
 
 
