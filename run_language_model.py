@@ -163,7 +163,7 @@ def main(
     print(f"[INIT] Loaded {len(all_prompts)} prompts. Starting generation with Auditing...", flush=True)
     
     try:
-        with open(os.path.join(inputs_dir, "set.json"), "r", encoding='utf-8') as file:
+        with open(os.path.join(inputs_dir, "setting.json"), "r", encoding='utf-8') as file:
             settings = json.load(file)
         suf = settings['suffix']
         adhesive = settings['adhesive_prompt']
