@@ -171,7 +171,8 @@ def main(
         max_gen_len: int = 256,
         max_batch_size: int = 1,
         dp_alpha: float = 2.0,
-    no_dp_rag: bool = False,
+        dp_beta: float = 1.0,
+        no_dp_rag: bool = False,
 ):
     print(f"\n[INIT] Single-Model Inference started for path: {path}")
     if no_dp_rag:
