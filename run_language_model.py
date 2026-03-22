@@ -43,13 +43,14 @@ def find_lambda_bisection(p_priv, p_pub, alpha, max_div, max_iter=20, tol=1e-5):
 def get_safe_context(text, model, tokenizer, device):
     messages = [
         {"role": "system", "content": """You are a privacy anonymization assistant.
-Extract ONLY specific medical terms (diseases, tests, meds), proper names, and locations.
-IGNORE common English words (I, my, is, for, the, etc.) and punctuation.
+Extract sensitive entities (names, meds, conditions, locations) and provide a NATURAL LANGUAGE generalization.
+Example generalizations: 'a patient', 'a medical condition', 'a care facility', 'the medication', 'a measured value'.
+IGNORE common English words and punctuation.
 
-Format: JSON array [{"entity": "word", "type": "[TAG]"}]
+Format: JSON array [{"entity": "word", "type": "generalization"}]
 If no entities found, output []."""},
         {"role": "user", "content": "Text: Hi, I am John. My GFR test at City Hospital was 45 mL/min."},
-        {"role": "assistant", "content": '[{"entity": "John", "type": "[PERSON]"}, {"entity": "GFR", "type": "[MEDICAL_TEST]"}, {"entity": "City Hospital", "type": "[LOCATION]"}, {"entity": "45 mL/min", "type": "[QUANTITATIVE_VALUE]"}]'},
+        {"role": "assistant", "content": '[{"entity": "John", "type": "a patient"}, {"entity": "GFR", "type": "a blood test"}, {"entity": "City Hospital", "type": "a care facility"}, {"entity": "45 mL/min", "type": "a measured value"}]'},
         {"role": "user", "content": f"Text: {text}"}
     ]
     try:
@@ -62,13 +63,10 @@ If no entities found, output []."""},
 
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
-        # Increased max_new_tokens for longer lists
         outputs = model.generate(**inputs, max_new_tokens=512, do_sample=False, pad_token_id=tokenizer.eos_token_id)
     resp_raw = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
     
-    # Ensure it starts with [ to help parsing
     resp = "[" + resp_raw if not resp_raw.strip().startswith("[") else resp_raw
-    # Try to close it if model cut off
     if "]" not in resp:
         last_brace = resp.rfind("}")
         if last_brace != -1:
@@ -77,35 +75,29 @@ If no entities found, output []."""},
     safe_text = text
     found_entities = []
     
-    # Extraction with stop-words and length filter
     stop_words = {'i', 'me', 'my', 'am', 'is', 'a', 'an', 'the', 'hey', 'hi', 'it', 'doing', 'this', 'that', 'with', 'was', 'for', 'of', 'and', 'to', 'in', 'on', 'at'}
     for match in re.finditer(r'\{[^{}]*\}', resp):
         try:
             d_str = match.group().replace("'", '"')
             ent = json.loads(d_str)
             if isinstance(ent, dict) and 'entity' in ent and 'type' in ent:
-                # Clean entity: strip and check length/stop-words
                 ent_text = str(ent['entity']).strip()
-                if len(ent_text) <= 1: continue # Skip single letters
+                if len(ent_text) <= 1: continue 
                 if ent_text.lower() in stop_words: continue 
-                
                 found_entities.append(ent)
         except Exception:
             pass
             
     if found_entities:
         found_entities.sort(key=lambda x: len(str(x['entity'])), reverse=True)
-        print(f"\n[AUDIT C-Module] Found {len(found_entities)} entities for generalization.", flush=True)
+        print(f"\n[AUDIT C-Module] Found {len(found_entities)} entities for semantic generalization.", flush=True)
         for ent in found_entities:
             entity_text = str(ent['entity']).strip()
-            tag = str(ent['type']).strip()
-            # Stricter boundary: word boundary OR punctuation but NOT mid-word
-            # Use negative lookahead/lookbehind to avoid breaking contractions like "don't"
-            # We want to match 'entity' only if it's not followed/preceded by alphabetic chars
+            # Generalization is now a natural phrase
+            general_phrase = str(ent['type']).strip() 
             pattern = r'(?<![a-zA-Z0-9])' + re.escape(entity_text) + r'(?![a-zA-Z0-9])'
-            safe_text = re.sub(pattern, tag, safe_text)
+            safe_text = re.sub(pattern, general_phrase, safe_text)
     else:
-        # Check if model actually intended to return empty list
         if "[]" in resp or "{}" not in resp:
             print(f"\n[AUDIT C-Module] Success: No specific entities requiring redaction.")
         else:
