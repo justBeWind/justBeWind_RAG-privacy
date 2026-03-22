@@ -138,6 +138,16 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
         p_mixed = lam * p_priv + (1.0 - lam) * p_pub
         
         if temperature > 0:
+            if top_p < 1.0:
+                sorted_probs, sorted_indices = torch.sort(p_mixed, descending=True)
+                cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+                sorted_indices_to_remove = cumulative_probs > top_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                p_mixed[indices_to_remove] = 0.0
+                p_mixed = p_mixed / p_mixed.sum(dim=-1, keepdim=True)
+            
             next_token = torch.multinomial(p_mixed, num_samples=1)
         else:
             next_token = torch.argmax(p_mixed, dim=-1).unsqueeze(0)
