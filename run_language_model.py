@@ -42,42 +42,34 @@ def find_lambda_bisection(p_priv, p_pub, alpha, max_div, max_iter=20, tol=1e-5):
 
 def get_safe_context(text, model, tokenizer, device):
     messages = [
-        {"role": "system", "content": """You are defensive privacy anonymization engine. 
-Identify and generalize sensitive entities while preserving utility.
+        {"role": "system", "content": """You are a privacy anonymization assistant.
+Extract ONLY specific medical terms (diseases, tests, meds), proper names, and locations.
+IGNORE common English words (I, my, is, for, the, etc.) and punctuation.
 
-CRITICAL RULES:
-1. ONLY extract specific proper names, technical clinical terms, measurements, or unique identifiers.
-2. DO NOT extract common English words (pronouns like 'I', 'me', common verbs like 'am', 'is', 'doing', or greetings like 'hi', 'hey').
-3. Keep multi-word entities together (e.g., 'blood pressure', not 'blood' and 'pressure').
-4. Map entities to general categories: [PERSON], [MEDICAL_TEST], [QUANTITATIVE_VALUE], [CONDITION], [MEDICATION], [LOCATION].
-
-Output MUST be a valid JSON array: [{"entity": "exact_text", "type": "[TAG]"}]. 
-Provide ONLY the JSON."""},
-        {"role": "user", "content": "Text: Hi, I'm John. My GFR test at City Hospital was 45 mL/min today."},
+Format: JSON array [{"entity": "word", "type": "[TAG]"}]
+If no entities found, output []."""},
+        {"role": "user", "content": "Text: Hi, I am John. My GFR test at City Hospital was 45 mL/min."},
         {"role": "assistant", "content": '[{"entity": "John", "type": "[PERSON]"}, {"entity": "GFR", "type": "[MEDICAL_TEST]"}, {"entity": "City Hospital", "type": "[LOCATION]"}, {"entity": "45 mL/min", "type": "[QUANTITATIVE_VALUE]"}]'},
         {"role": "user", "content": f"Text: {text}"}
     ]
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     except Exception:
-        # Fallback for models without chat template
-        sys_p = messages[0]['content']
-        user_p = messages[3]['content']
-        prompt = f"System: {sys_p}\n\nUser: {user_p}\n\nAssistant: ["
+        prompt = f"System: {messages[0]['content']}\n\nUser: {text}\n\nAssistant: ["
 
-    # If prompt doesn't end with "[", force it to encourage JSON array start
     if not prompt.strip().endswith("["):
         prompt += "["
 
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
+        # Increased max_new_tokens for longer lists
         outputs = model.generate(**inputs, max_new_tokens=512, do_sample=False, pad_token_id=tokenizer.eos_token_id)
     resp_raw = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
     
-    # Re-normalize response to ensure it's a valid JSON array string
+    # Ensure it starts with [ to help parsing
     resp = "[" + resp_raw if not resp_raw.strip().startswith("[") else resp_raw
-    if not resp.strip().endswith("]"):
-        # Look for the last } and add ]
+    # Try to close it if model cut off
+    if "]" not in resp:
         last_brace = resp.rfind("}")
         if last_brace != -1:
             resp = resp[:last_brace+1] + "]"
@@ -85,36 +77,40 @@ Provide ONLY the JSON."""},
     safe_text = text
     found_entities = []
     
-    # More robust JSON regex
+    # Extraction with stop-words and length filter
+    stop_words = {'i', 'me', 'my', 'am', 'is', 'a', 'an', 'the', 'hey', 'hi', 'it', 'doing', 'this', 'that', 'with', 'was', 'for', 'of', 'and', 'to', 'in', 'on', 'at'}
     for match in re.finditer(r'\{[^{}]*\}', resp):
         try:
             d_str = match.group().replace("'", '"')
             ent = json.loads(d_str)
             if isinstance(ent, dict) and 'entity' in ent and 'type' in ent:
-                # Basic Stop-word Filter for common 1-2 letter words or pronouns
-                stop_words = {'i', 'me', 'my', 'am', 'is', 'a', 'an', 'the', 'hey', 'hi', 'it', 'doing', 'this', 'that'}
-                if str(ent['entity']).lower().strip() not in stop_words:
-                    found_entities.append(ent)
+                # Clean entity: strip and check length/stop-words
+                ent_text = str(ent['entity']).strip()
+                if len(ent_text) <= 1: continue # Skip single letters
+                if ent_text.lower() in stop_words: continue 
+                
+                found_entities.append(ent)
         except Exception:
             pass
             
     if found_entities:
-        # Sort by length descending to avoid partial replacement (e.g., 'blood' before 'blood pressure')
         found_entities.sort(key=lambda x: len(str(x['entity'])), reverse=True)
-        print(f"\n[AUDIT C-Module] Generalizing {len(found_entities)} entities...", flush=True)
+        print(f"\n[AUDIT C-Module] Found {len(found_entities)} entities for generalization.", flush=True)
         for ent in found_entities:
-            entity_text = str(ent['entity'])
-            tag = str(ent['type'])
-            # Word-boundary aware replacement to avoid breaking words (like 'if' inside 'gift')
-            pattern = r'\b' + re.escape(entity_text) + r'\b'
+            entity_text = str(ent['entity']).strip()
+            tag = str(ent['type']).strip()
+            # Stricter boundary: word boundary OR punctuation but NOT mid-word
+            # Use negative lookahead/lookbehind to avoid breaking contractions like "don't"
+            # We want to match 'entity' only if it's not followed/preceded by alphabetic chars
+            pattern = r'(?<![a-zA-Z0-9])' + re.escape(entity_text) + r'(?![a-zA-Z0-9])'
             safe_text = re.sub(pattern, tag, safe_text)
     else:
-        # Only fallback to full redaction if the response was truly empty or unparseable
-        if "[REDACTED]" not in resp and "{" not in resp:
+        # Check if model actually intended to return empty list
+        if "[]" in resp or "{}" not in resp:
+            print(f"\n[AUDIT C-Module] Success: No specific entities requiring redaction.")
+        else:
             print(f"\n[AUDIT C-Module Warning] Heavy parsing failure. Fallback to Full Redaction.", flush=True)
             safe_text = "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]"
-        else:
-            print(f"\n[AUDIT C-Module Warning] Partial parse success or empty entities.")
             
     return safe_text, found_entities
 
