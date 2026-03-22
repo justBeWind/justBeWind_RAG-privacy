@@ -42,62 +42,80 @@ def find_lambda_bisection(p_priv, p_pub, alpha, max_div, max_iter=20, tol=1e-5):
 
 def get_safe_context(text, model, tokenizer, device):
     messages = [
-        {"role": "system", "content": """You are a high-precision privacy anonymization engine. 
-Your task is to identify and generalize ALL sensitive and specific entities in the provided text to maintain privacy while preserving semantic meaning.
+        {"role": "system", "content": """You are defensive privacy anonymization engine. 
+Identify and generalize sensitive entities while preserving utility.
 
-EXTRACT AND GENERALIZE:
-1. Personal Identifiers: Names, Emails, Phone numbers, Addresses, Social IDs.
-2. Technical & Domain-Specific Data: Specific clinical tests, lab values, specialized equipment, unique project names, or proprietary technical parameters.
-3. Specific Conditions or Topics: Detailed disease names, unique symptoms, or specific technical diagnoses.
-4. Organizations & Locations: Hospitals, Clinics, Companies, specific cities.
+CRITICAL RULES:
+1. ONLY extract specific proper names, technical clinical terms, measurements, or unique identifiers.
+2. DO NOT extract common English words (pronouns like 'I', 'me', common verbs like 'am', 'is', 'doing', or greetings like 'hi', 'hey').
+3. Keep multi-word entities together (e.g., 'blood pressure', not 'blood' and 'pressure').
+4. Map entities to general categories: [PERSON], [MEDICAL_TEST], [QUANTITATIVE_VALUE], [CONDITION], [MEDICATION], [LOCATION].
 
-GENERALIZATION RULES:
-- Map entities to 'Intermediate-level Semantic Categories'.
-- Examples: 
-  'John Smith' -> '[PERSON]'
-  'St. Jude Hospital' -> '[MEDICAL_INSTITUTION]'
-  'blood creatinine' -> '[CLINICAL_TEST]'
-  '88 mg/dL' -> '[QUANTITATIVE_VALUE]'
-  'Project Alpha' -> '[PROJECT_NAME]'
-
-Output MUST be a valid JSON array of objects: [{"entity": "exact_word", "type": "[TAG]"}]. 
-Provide ONLY the JSON array. Do not include any introductory or concluding text."""},
-        {"role": "user", "content": "Text: Contact John regarding the Project X report. The GFR test at City Hospital showed 45 mL/min."},
-        {"role": "assistant", "content": '[{"entity": "John", "type": "[PERSON]"}, {"entity": "Project X", "type": "[PROJECT_NAME]"}, {"entity": "GFR", "type": "[CLINICAL_TEST]"}, {"entity": "City Hospital", "type": "[MEDICAL_INSTITUTION]"}, {"entity": "45 mL/min", "type": "[QUANTITATIVE_VALUE]"}]'},
+Output MUST be a valid JSON array: [{"entity": "exact_text", "type": "[TAG]"}]. 
+Provide ONLY the JSON."""},
+        {"role": "user", "content": "Text: Hi, I'm John. My GFR test at City Hospital was 45 mL/min today."},
+        {"role": "assistant", "content": '[{"entity": "John", "type": "[PERSON]"}, {"entity": "GFR", "type": "[MEDICAL_TEST]"}, {"entity": "City Hospital", "type": "[LOCATION]"}, {"entity": "45 mL/min", "type": "[QUANTITATIVE_VALUE]"}]'},
         {"role": "user", "content": f"Text: {text}"}
     ]
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     except Exception:
-        prompt = f"System: {messages[0]['content']}\n\nUser: {messages[1]['content']}\n\nAssistant: {messages[2]['content']}\n\nUser: {messages[3]['content']}\n\nAssistant:\n"
-    
-    prompt += "["
+        # Fallback for models without chat template
+        sys_p = messages[0]['content']
+        user_p = messages[3]['content']
+        prompt = f"System: {sys_p}\n\nUser: {user_p}\n\nAssistant: ["
+
+    # If prompt doesn't end with "[", force it to encourage JSON array start
+    if not prompt.strip().endswith("["):
+        prompt += "["
+
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=500, do_sample=False, pad_token_id=tokenizer.eos_token_id)
-    resp = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        outputs = model.generate(**inputs, max_new_tokens=512, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+    resp_raw = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
     
-    resp = "[" + resp
+    # Re-normalize response to ensure it's a valid JSON array string
+    resp = "[" + resp_raw if not resp_raw.strip().startswith("[") else resp_raw
+    if not resp.strip().endswith("]"):
+        # Look for the last } and add ]
+        last_brace = resp.rfind("}")
+        if last_brace != -1:
+            resp = resp[:last_brace+1] + "]"
+
     safe_text = text
     found_entities = []
     
+    # More robust JSON regex
     for match in re.finditer(r'\{[^{}]*\}', resp):
         try:
             d_str = match.group().replace("'", '"')
             ent = json.loads(d_str)
             if isinstance(ent, dict) and 'entity' in ent and 'type' in ent:
-                found_entities.append(ent)
+                # Basic Stop-word Filter for common 1-2 letter words or pronouns
+                stop_words = {'i', 'me', 'my', 'am', 'is', 'a', 'an', 'the', 'hey', 'hi', 'it', 'doing', 'this', 'that'}
+                if str(ent['entity']).lower().strip() not in stop_words:
+                    found_entities.append(ent)
         except Exception:
             pass
             
     if found_entities:
-        print(f"\n[AUDIT C-Module] Found entities to generalize: {found_entities}", flush=True)
+        # Sort by length descending to avoid partial replacement (e.g., 'blood' before 'blood pressure')
+        found_entities.sort(key=lambda x: len(str(x['entity'])), reverse=True)
+        print(f"\n[AUDIT C-Module] Generalizing {len(found_entities)} entities...", flush=True)
         for ent in found_entities:
-            safe_text = safe_text.replace(str(ent['entity']), str(ent['type']))
+            entity_text = str(ent['entity'])
+            tag = str(ent['type'])
+            # Word-boundary aware replacement to avoid breaking words (like 'if' inside 'gift')
+            pattern = r'\b' + re.escape(entity_text) + r'\b'
+            safe_text = re.sub(pattern, tag, safe_text)
     else:
-        print(f"\n[AUDIT C-Module Warning] JSON parsing entirely failed. Fallback to Full Redaction.", flush=True)
-        safe_text = "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]"
-        
+        # Only fallback to full redaction if the response was truly empty or unparseable
+        if "[REDACTED]" not in resp and "{" not in resp:
+            print(f"\n[AUDIT C-Module Warning] Heavy parsing failure. Fallback to Full Redaction.", flush=True)
+            safe_text = "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]"
+        else:
+            print(f"\n[AUDIT C-Module Warning] Partial parse success or empty entities.")
+            
     return safe_text, found_entities
 
 def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=2.0, max_div=1.0):
