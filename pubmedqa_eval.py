@@ -3,15 +3,15 @@ import argparse
 import re
 
 def parse_label(answer):
-    # Search for yes/no/maybe in the answer
-    answer = answer.lower()
-    if re.search(r'\byes\b', answer):
-        return "yes"
-    if re.search(r'\bno\b', answer):
-        return "no"
-    if re.search(r'\bmaybe\b', answer):
-        return "maybe"
-    # Fallback if multiple are present or none are clear
+    # Search for yes/no/maybe in the answer, prioritizing clean matches
+    answer = answer.lower().strip()
+    
+    # Check for exact matches or clear indicators
+    if re.search(r'\b(yes|no|maybe)\b', answer):
+        # If both yes and no are found, try to find the one closer to the end (often the final answer)
+        matches = list(re.finditer(r'\b(yes|no|maybe)\b', answer))
+        return matches[-1].group(1) 
+        
     return "unknown"
 
 def main():

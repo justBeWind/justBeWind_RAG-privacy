@@ -10,14 +10,14 @@ def preprocess_pubmedqa():
     os.makedirs(data_dir, exist_ok=True)
     
     # 1. Create pubmedqa.txt for indexing (the knowledge base)
-    # We use the context and long_answer as the ground truth knowledge
+    # CRITICAL: We only index the 'context' to prevent the model from 
+    # seeing the ground truth labels during RAG retrieval.
     index_path = os.path.join(data_dir, "pubmedqa.txt")
     with open(index_path, "w", encoding="utf-8") as f:
         for i, item in enumerate(dataset):
-            # Context is a list of strings
             context = " ".join(item['context']['contexts'])
-            entry = f"Context: {context}\nQuestion: {item['question']}\nAnswer: {item['long_answer']}\nLabel: {item['final_decision']}"
-            f.write(entry + "\n\n")
+            # Only write context, skip Question, Long Answer, and Label
+            f.write(context + "\n\n")
             
     # 2. Create evaluation pairs (questions and ground truth answers)
     eval_input = [item['question'] for item in dataset]
