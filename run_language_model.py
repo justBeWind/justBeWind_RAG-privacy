@@ -137,12 +137,16 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
         lam, div = find_lambda_bisection(p_priv, p_pub, alpha, max_div)
         p_mixed = lam * p_priv + (1.0 - lam) * p_pub
         
-        next_token = torch.argmax(p_mixed, dim=-1).unsqueeze(0)
+        if temperature > 0:
+            next_token = torch.multinomial(p_mixed, num_samples=1)
+        else:
+            next_token = torch.argmax(p_mixed, dim=-1).unsqueeze(0)
         
-        generated_tokens.append(next_token.item())
+        generated_token = next_token.item()
+        generated_tokens.append(generated_token)
         lambdas_log.append(lam)
         
-        if next_token.item() == eos_id:
+        if generated_token == eos_id:
             break
             
         attention_mask_priv = torch.cat([attention_mask_priv, torch.ones((1, 1), device=device, dtype=torch.long)], dim=1)
@@ -236,7 +240,15 @@ def main(
                 prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
                 
             ans, avg_lam = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
-            status = "SUCCESS" if c_entities else "FALLBACK_REDACTED"
+            
+            if c_entities:
+                status = "SUCCESS"
+            else:
+                # If no entities extracted, check if it was a success or a parsing error
+                if "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]" in prompt_pub:
+                    status = "FALLBACK_REDACTED"
+                else:
+                    status = "NO_ENTITIES_SAFE"
 
         end_time = time.time()
         gen_time = end_time - start_time
