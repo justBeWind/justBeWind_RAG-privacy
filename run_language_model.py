@@ -171,10 +171,13 @@ def main(
         max_gen_len: int = 256,
         max_batch_size: int = 1,
         dp_alpha: float = 2.0,
-        dp_beta: float = 1.0,
+    no_dp_rag: bool = False,
 ):
-    print(f"\n[INIT] Single-Model DP-RAG Inference started for path: {path}")
-    print(f"Hyperparams -> Temp: {temperature}, DP_Alpha: {dp_alpha}, DP_Beta(Divergence_Bound): {dp_beta}", flush=True)
+    print(f"\n[INIT] Single-Model Inference started for path: {path}")
+    if no_dp_rag:
+        print("Mode: BASELINE RAG (No Privacy Protection)")
+    else:
+        print(f"Mode: DP-RAG (Alpha: {dp_alpha}, Beta: {dp_beta})", flush=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[INIT] Loading HuggingFace model: {ckpt_dir} on {device}...", flush=True)
@@ -187,44 +190,63 @@ def main(
     with open(os.path.join(inputs_dir, "prompts.json"), 'r', encoding='utf-8') as f:
         all_prompts = json.loads(f.read())
         
-    print(f"[INIT] Loaded {len(all_prompts)} prompts. Starting generation with Auditing...", flush=True)
+    print(f"[INIT] Loaded {len(all_prompts)} prompts. Starting generation...", flush=True)
     
     answer_log = []
     audit_log = []
     ckpt_safe_name = ckpt_dir.split('/')[-1]
-    out_name = f"{inputs_dir}/outputs-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
-    audit_name = f"{inputs_dir}/audit-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
     
-    for i, prompt_priv in tqdm(enumerate(all_prompts), total=len(all_prompts), desc="DP-RAG Pipeline"):
+    suffix = "-baseline" if no_dp_rag else ""
+    out_name = f"{inputs_dir}/outputs-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}{suffix}.json"
+    audit_name = f"{inputs_dir}/audit-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}{suffix}.json"
+    
+    for i, prompt_priv in tqdm(enumerate(all_prompts), total=len(all_prompts), desc="Inference Pipeline"):
         
-        # Hardcoded exact string split based on A's RAG-privacy prompt format
-        start_marker = "context: "
-        end_marker = "\nquestion: "
-        start_idx = prompt_priv.find(start_marker)
-        
-        if start_idx != -1 and (end_idx := prompt_priv.find(end_marker, start_idx)) != -1:
-            start_idx += len(start_marker)
-            context_str = prompt_priv[start_idx:end_idx]
-            safe_context, c_entities = get_safe_context(context_str, model, tokenizer, device)
-            prompt_pub = prompt_priv[:start_idx] + safe_context + prompt_priv[end_idx:]
-        else:
-            prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
-            
         start_time = time.time()
-        ans, avg_lam = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
-        end_time = time.time()
         
+        if no_dp_rag:
+            # Baseline: Just standard generation on the original prompt
+            inputs = tokenizer(prompt_priv, return_tensors="pt").to(device)
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs, 
+                    max_new_tokens=max_gen_len, 
+                    temperature=temperature, 
+                    top_p=top_p, 
+                    do_sample=(temperature > 0),
+                    pad_token_id=tokenizer.eos_token_id
+                )
+            ans = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+            avg_lam = 1.0
+            c_entities = []
+            status = "BASELINE"
+        else:
+            # DP-RAG: C-Module + B-Module
+            start_marker = "context: "
+            end_marker = "\nquestion: "
+            start_idx = prompt_priv.find(start_marker)
+            
+            if start_idx != -1 and (end_idx := prompt_priv.find(end_marker, start_idx)) != -1:
+                start_idx += len(start_marker)
+                context_str = prompt_priv[start_idx:end_idx]
+                safe_context, c_entities = get_safe_context(context_str, model, tokenizer, device)
+                prompt_pub = prompt_priv[:start_idx] + safe_context + prompt_priv[end_idx:]
+            else:
+                prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
+                
+            ans, avg_lam = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
+            status = "SUCCESS" if c_entities else "FALLBACK_REDACTED"
+
+        end_time = time.time()
         gen_time = end_time - start_time
-        print(f"\n[B-Module Output #{i+1}] Length: {len(ans)} chars. Fusion Weight Lambda: {avg_lam:.4f}. Generation Time: {gen_time:.2f}s", flush=True)
+        
+        print(f"\n[Output #{i+1}] Length: {len(ans)} chars. Time: {gen_time:.2f}s", flush=True)
         answer_log.append(ans)
         
-        # Incrementally log the Global Audit state
-        # Enhancing snapshot with specific module status flags as per rigorous ablation requirements
         audit_log.append({
             "prompt_index": i + 1,
-            "c_module_status": "SUCCESS" if c_entities else "FALLBACK_REDACTED",
-            "c_module_entities_extracted": len(c_entities) if c_entities else 0,
-            "c_module_entities_details": c_entities,
+            "status": status,
+            "c_module_entities_extracted": len(c_entities),
             "b_module_fusion_lambda_avg": round(avg_lam, 4),
             "b_module_output_length": len(ans),
             "generation_time_sec": round(gen_time, 2)
