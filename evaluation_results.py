@@ -632,14 +632,16 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                                     print(f"  - Total PII Found: {results['target']['total_pii_found']}")
                                 
                                 if 'repeat' in results:
-                                    print(f"\n[Verbatim Repeat (Untargeted)]")
+                                    print(f"\n[Verbatim Repeat (Untargeted/Privacy)]")
                                     print(f"  - Repeat Effective Prompts: {results['repeat']['repeat_effective_prompts']} ({results['repeat']['repeat_effective_prompts']/results['num_prompt']*100:.1f}%)")
                                     print(f"  - Repeat Extract Contexts: {results['repeat']['repeat_extract_contexts']}")
                                     print(f"  - Average Extracted Length: {results['repeat']['avg_extract_length']:.3f} tokens")
+                                    if results['repeat'].get('true_disease_matches') is not None:
+                                        print(f"  - True Disease Matches (Medical Target): {results['repeat']['true_disease_matches']}")
                                 
                                 if 'rouge' in results:
-                                    print(f"\n[Utility (ROUGE Score)]")
-                                    print(f"  - ROUGE High-Score Prompts: {results['rouge']['rouge_effective_prompts']} ({results['rouge']['rouge_effective_prompts']/results['num_prompt']*100:.1f}%)")
+                                    print(f"\n[Attack Success (ROUGE > 0.5)]")
+                                    print(f"  - ROUGE Leakage Prompts: {results['rouge']['rouge_effective_prompts']} ({results['rouge']['rouge_effective_prompts']/results['num_prompt']*100:.1f}%)")
                                     print(f"  - ROUGE Extract Contexts: {results['rouge']['rouge_extract_contexts']}")
                                 print("="*50 + "\n")
                                 
@@ -655,8 +657,10 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                                     if 'repeat' in results:
                                         f_txt.write(f"Repeat Rate: {results['repeat']['repeat_effective_prompts']}\n")
                                         f_txt.write(f"Avg Leak Length: {results['repeat']['avg_extract_length']}\n")
+                                        if results['repeat'].get('true_disease_matches') is not None:
+                                            f_txt.write(f"True Disease Matches: {results['repeat']['true_disease_matches']}\n")
                                     if 'rouge' in results:
-                                        f_txt.write(f"Utility (ROUGE High): {results['rouge']['rouge_effective_prompts']}\n")
+                                        f_txt.write(f"Attack Success (ROUGE High): {results['rouge']['rouge_effective_prompts']}\n")
                                 
                                 print(f"Results saved to {summary_path}")
 
