@@ -597,7 +597,9 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                             for suffix in ["", "-baseline"]:
                                 try:
                                     sources_, outputs_, contexts_ = get_data(path_, model, tem, p, seq, gen, suffix)
-                                except Exception:
+                                except Exception as e:
+                                    if suffix == "":
+                                        print(f"DEBUG: Failed to load DP-RAG data for {path_}: {e}")
                                     continue
                                 
                                 # i_ += 1
