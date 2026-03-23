@@ -235,6 +235,7 @@ def main(
             avg_lam = 1.0
             c_entities = []
             status = "BASELINE"
+            prompt_pub = prompt_priv # In baseline, public prompt is the same as private
         else:
             # DP-RAG: C-Module + B-Module
             start_marker = "context: "
@@ -270,7 +271,10 @@ def main(
             "prompt_index": i + 1,
             "status": status,
             "c_module_entities_extracted": len(c_entities),
+            "c_module_entities_details": c_entities,
             "b_module_fusion_lambda_avg": round(avg_lam, 4),
+            "b_module_prompt_privacy": prompt_priv,
+            "b_module_prompt_public": prompt_pub,
             "b_module_output_length": len(ans),
             "generation_time_sec": round(gen_time, 2)
         })
