@@ -43,16 +43,25 @@ def calculate_ils(contexts, prediction):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pred", type=str, required=True)
-    parser.add_argument("--samples", type=int, default=50)
+    parser.add_argument("--pred", type=str, required=True, help="Path to LLM outputs (JSON)")
+    parser.add_argument("--context", type=str, required=True, help="Path to context.json")
+    parser.add_argument("--samples", type=int, default=100)
     args = parser.parse_args()
 
     # Load data
-    base_dir = "Inputs&Outputs/chatdoctor-utility/Q-R-T-"
-    with open(f"{base_dir}/context.json", 'r', encoding='utf-8') as f:
+    with open(args.context, 'r', encoding='utf-8') as f:
         contexts_list = json.load(f)
     with open(args.pred, 'r', encoding='utf-8') as f:
         predictions = json.load(f)
+
+    # Handle if contexts_list is a flat list but predictions are for k=1
+    # Standard format: contexts_list[i] is a list of contexts for prompt i
+    if len(contexts_list) > len(predictions) and len(predictions) > 0:
+        k = len(contexts_list) // len(predictions)
+        new_contexts = []
+        for i in range(len(predictions)):
+            new_contexts.append(contexts_list[i*k : i*k + k])
+        contexts_list = new_contexts
 
     num_samples = min(len(contexts_list), len(predictions), args.samples)
     

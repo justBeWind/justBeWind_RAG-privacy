@@ -14,7 +14,15 @@ from matplotlib import colormaps
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from retrieval_database import find_all_file, get_encoding_of_file
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError:
+        # Fallback if both fail
+        class RecursiveCharacterTextSplitter: pass
+
 from langchain_community.document_loaders import TextLoader
 
 """
@@ -93,10 +101,10 @@ def get_change_items(output_dir: str, flag_print: bool = True):
     return settings_, title_table_, table_list_
 
 
-def get_data(path, ckpt_dir, temperature, top_p, max_seq_len, max_gen_len):
+def get_data(path, ckpt_dir, temperature, top_p, max_seq_len, max_gen_len, suffix=""):
     # if output not exist, return is question
     ckpt_name = ckpt_dir.split('/')[-1]
-    r_path = f"./Inputs&Outputs/{path}/outputs-{ckpt_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}.json"
+    r_path = f"./Inputs&Outputs/{path}/outputs-{ckpt_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}{suffix}.json"
     if not os.path.exists(r_path):
         r_path = f"./Inputs&Outputs/{path}/question.json"
     with open(r_path, 'r', encoding='utf-8') as f:
@@ -585,10 +593,16 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                 for p in settings_['LLM']['top_p']:
                     for seq in settings_['LLM']['max_seq_len']:
                         for gen in settings_['LLM']['max_gen_len']:
-                            sources_, outputs_, contexts_ = get_data(path_, model, tem, p, seq, gen)
-                            # i_ += 1
-                            results = {}
-                            results['num_prompt'] = len(outputs_)
+                            # Evaluate both standard and baseline if present
+                            for suffix in ["", "-baseline"]:
+                                try:
+                                    sources_, outputs_, contexts_ = get_data(path_, model, tem, p, seq, gen, suffix)
+                                except Exception:
+                                    continue
+                                
+                                # i_ += 1
+                                results = {}
+                                results['num_prompt'] = len(outputs_)
                             
                             if 'retrieval' in eval_content:
                                 results['retrieval'] = evaluate_retrieval_step(sources_, contexts_, eval_set['retrieval_list'])
@@ -630,13 +644,13 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                             print("="*50 + "\n")
 
                             # Save to File
-                            summary_path = f"./Inputs&Outputs/{path_}/evaluation_summary.json"
+                            summary_path = f"./Inputs&Outputs/{path_}/evaluation_summary{suffix}.json"
                             with open(summary_path, 'w', encoding='utf-8') as f_out:
                                 json.dump(results, f_out, indent=4, ensure_ascii=False)
                             
-                            txt_path = f"./Inputs&Outputs/{path_}/evaluation_summary.txt"
+                            txt_path = f"./Inputs&Outputs/{path_}/evaluation_summary{suffix}.txt"
                             with open(txt_path, 'w', encoding='utf-8') as f_txt:
-                                f_txt.write(f"Evaluation Summary for {path_}\n")
+                                f_txt.write(f"Evaluation Summary for {path_} {suffix}\n")
                                 f_txt.write(f"Num Prompt: {results['num_prompt']}\n")
                                 if 'repeat' in results:
                                     f_txt.write(f"Repeat Rate: {results['repeat']['repeat_effective_prompts']}\n")
