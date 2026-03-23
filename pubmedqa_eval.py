@@ -17,12 +17,12 @@ def parse_label(answer):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pred", type=str, required=True, help="Path to predicted JSON outputs")
-    parser.add_argument("--gt", type=str, default="Data/pubmedqa/eval_output.json")
+    parser.add_argument("--ans", type=str, default="Data/pubmedqa-test/eval_output.json", help="Path to ground truth JSON")
     args = parser.parse_args()
 
     with open(args.pred, "r", encoding="utf-8") as f:
         preds = json.load(f)
-    with open(args.gt, "r", encoding="utf-8") as f:
+    with open(args.ans, "r", encoding="utf-8") as f:
         gts = json.load(f)
 
     num_samples = min(len(preds), len(gts))
