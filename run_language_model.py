@@ -124,6 +124,7 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
     
     generated_tokens = []
     lambdas_log = []
+    divergences_log = []
     
     logits_priv = out_priv.logits[:, -1, :]
     logits_pub = out_pub.logits[:, -1, :]
@@ -155,6 +156,7 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
         generated_token = next_token.item()
         generated_tokens.append(generated_token)
         lambdas_log.append(lam)
+        divergences_log.append(div)
         
         if generated_token == eos_id:
             break
@@ -173,7 +175,7 @@ def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_ge
 
     text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
     avg_lam = sum(lambdas_log)/len(lambdas_log) if lambdas_log else 0
-    return text, avg_lam
+    return text, avg_lam, divergences_log
 
 def main(
         ckpt_dir: str,
@@ -250,7 +252,7 @@ def main(
             else:
                 prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
                 
-            ans, avg_lam = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
+            ans, avg_lam, divs = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
             
             if c_entities:
                 status = "SUCCESS"
@@ -273,6 +275,7 @@ def main(
             "c_module_entities_extracted": len(c_entities),
             "c_module_entities_details": c_entities,
             "b_module_fusion_lambda_avg": round(avg_lam, 4),
+            "b_module_token_divergences": [round(d, 6) for d in divs] if not no_dp_rag else [],
             "b_module_prompt_privacy": prompt_priv,
             "b_module_prompt_public": prompt_pub,
             "b_module_output_length": len(ans),
