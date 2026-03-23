@@ -643,6 +643,8 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                                     print(f"\n[Attack Success (ROUGE > 0.5)]")
                                     print(f"  - ROUGE Leakage Prompts: {results['rouge']['rouge_effective_prompts']} ({results['rouge']['rouge_effective_prompts']/results['num_prompt']*100:.1f}%)")
                                     print(f"  - ROUGE Extract Contexts: {results['rouge']['rouge_extract_contexts']}")
+                                    if results['rouge'].get('rouge_true_disease_matches') is not None:
+                                        print(f"  - True Disease Matches (Semantic Target): {results['rouge']['rouge_true_disease_matches']}")
                                 print("="*50 + "\n")
                                 
                                 # Save to File
@@ -658,9 +660,11 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                                         f_txt.write(f"Repeat Rate: {results['repeat']['repeat_effective_prompts']}\n")
                                         f_txt.write(f"Avg Leak Length: {results['repeat']['avg_extract_length']}\n")
                                         if results['repeat'].get('true_disease_matches') is not None:
-                                            f_txt.write(f"True Disease Matches: {results['repeat']['true_disease_matches']}\n")
+                                            f_txt.write(f"True Disease Matches (Repeat): {results['repeat']['true_disease_matches']}\n")
                                     if 'rouge' in results:
                                         f_txt.write(f"Attack Success (ROUGE High): {results['rouge']['rouge_effective_prompts']}\n")
+                                        if results['rouge'].get('rouge_true_disease_matches') is not None:
+                                            f_txt.write(f"True Disease Matches (ROUGE): {results['rouge']['rouge_true_disease_matches']}\n")
                                 
                                 print(f"Results saved to {summary_path}")
 
