@@ -189,10 +189,13 @@ def main(
         dp_alpha: float = 2.0,
         dp_beta: float = 1.0,
         no_dp_rag: bool = False,
+        c_module_only: bool = False,
 ):
     print(f"\n[INIT] Single-Model Inference started for path: {path}")
     if no_dp_rag:
         print("Mode: BASELINE RAG (No Privacy Protection)")
+    elif c_module_only:
+        print("Mode: C-MODULE ONLY (Semantic Generalization Baseline)")
     else:
         print(f"Mode: DP-RAG (Alpha: {dp_alpha}, Beta: {dp_beta})", flush=True)
 
@@ -213,7 +216,12 @@ def main(
     audit_log = []
     ckpt_safe_name = ckpt_dir.split('/')[-1]
     
-    suffix = "-baseline" if no_dp_rag else ""
+    suffix = ""
+    if no_dp_rag:
+        suffix = "-baseline"
+    elif c_module_only:
+        suffix = "-c_only"
+
     out_name = f"{inputs_dir}/outputs-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}{suffix}.json"
     audit_name = f"{inputs_dir}/audit-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}{suffix}.json"
     
@@ -252,16 +260,33 @@ def main(
             else:
                 prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
                 
-            ans, avg_lam, divs = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
-            
-            if c_entities:
-                status = "SUCCESS"
+            if c_module_only:
+                # C-Module Only: Standard generation on the generalized prompt
+                inputs = tokenizer(prompt_pub, return_tensors="pt").to(device)
+                with torch.no_grad():
+                    outputs = model.generate(
+                        **inputs, 
+                        max_new_tokens=max_gen_len, 
+                        temperature=temperature, 
+                        top_p=top_p, 
+                        do_sample=(temperature > 0),
+                        pad_token_id=tokenizer.eos_token_id
+                    )
+                ans = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+                avg_lam = 1.0
+                divs = []
+                status = "C_MODULE_ONLY"
             else:
-                # If no entities extracted, check if it was a success or a parsing error
-                if "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]" in prompt_pub:
-                    status = "FALLBACK_REDACTED"
+                # Full DP-RAG (B + C)
+                ans, avg_lam, divs = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
+                
+                if c_entities:
+                    status = "SUCCESS"
                 else:
-                    status = "NO_ENTITIES_SAFE"
+                    if "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]" in prompt_pub:
+                        status = "FALLBACK_REDACTED"
+                    else:
+                        status = "NO_ENTITIES_SAFE"
 
         end_time = time.time()
         gen_time = end_time - start_time

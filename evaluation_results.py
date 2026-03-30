@@ -592,7 +592,7 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                     for seq in settings_['LLM']['max_seq_len']:
                         for gen in settings_['LLM']['max_gen_len']:
                             # Evaluate both standard and baseline if present
-                            for suffix in ["", "-baseline"]:
+                            for suffix in ["", "-baseline", "-c_only"]:
                                 try:
                                     sources_, outputs_, contexts_ = get_data(path_, model, tem, p, seq, gen, suffix)
                                 except Exception as e:
