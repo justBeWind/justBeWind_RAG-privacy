@@ -188,11 +188,11 @@ def main(
         max_batch_size: int = 1,
         dp_alpha: float = 2.0,
         dp_beta: float = 1.0,
-        no_dp_rag: bool = False,
+        baseline_only: bool = False,
         c_module_only: bool = False,
 ):
     print(f"\n[INIT] Single-Model Inference started for path: {path}")
-    if no_dp_rag:
+    if baseline_only:
         print("Mode: BASELINE RAG (No Privacy Protection)")
     elif c_module_only:
         print("Mode: C-MODULE ONLY (Semantic Generalization Baseline)")
@@ -217,7 +217,7 @@ def main(
     ckpt_safe_name = ckpt_dir.split('/')[-1]
     
     suffix = ""
-    if no_dp_rag:
+    if baseline_only:
         suffix = "-baseline"
     elif c_module_only:
         suffix = "-c_only"
@@ -229,7 +229,7 @@ def main(
         
         start_time = time.time()
         
-        if no_dp_rag:
+        if baseline_only:
             # Baseline: Just standard generation on the original prompt
             inputs = tokenizer(prompt_priv, return_tensors="pt").to(device)
             with torch.no_grad():
@@ -300,7 +300,7 @@ def main(
             "c_module_entities_extracted": len(c_entities),
             "c_module_entities_details": c_entities,
             "b_module_fusion_lambda_avg": round(avg_lam, 4),
-            "b_module_token_divergences": [round(d, 6) for d in divs] if not no_dp_rag else [],
+            "b_module_token_divergences": [round(d, 6) for d in divs] if not baseline_only else [],
             "b_module_prompt_privacy": prompt_priv,
             "b_module_prompt_public": prompt_pub,
             "b_module_output_length": len(ans),
