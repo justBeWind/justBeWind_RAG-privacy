@@ -15,7 +15,7 @@ from retrieval_database import load_retrieval_database_from_parameter, find_all_
 import transformers.utils.import_utils
 if not hasattr(transformers.utils.import_utils, 'is_torch_fx_available'):
     transformers.utils.import_utils.is_torch_fx_available = lambda: False
-from FlagEmbedding import FlagReranker
+from sentence_transformers import CrossEncoder
 
 import os
 import json
@@ -299,11 +299,10 @@ def get_contexts(data_name_list: List[List[str]],
                                     if len(rerank) != 1:
                                         dir_[6] = i7 + 1
                                     reranker = None
-                                    if r_rank == 'yes' or 'bge-reranker-large':
-                                        reranker = FlagReranker('BAAI/bge-reranker-large', use_fp16=True)
-                                        # Set use_fp16 to True speed computation with a slight performance degradation
+                                    if r_rank == 'yes' or r_rank == 'bge-reranker-large':
+                                        reranker = CrossEncoder('BAAI/bge-reranker-large', max_length=512)
                                     elif r_rank != 'no':
-                                        reranker = FlagReranker(f'{r_rank}', use_fp16=True)
+                                        reranker = CrossEncoder(f'{r_rank}', max_length=512)
                                     for i8, sum_ in enumerate(summarize):
                                         if len(summarize) != 1:
                                             dir_[7] = i8 + 1
@@ -323,8 +322,8 @@ def get_contexts(data_name_list: List[List[str]],
                                             # rerank operation
                                             if r_rank != 'no' and len(ori_context) != 0:
                                                 pairs = [(que, con.page_content) for con in ori_context]
-                                                scores = reranker.compute_score(pairs)
-                                                combined = sorted(zip(ori_context, scores), key=lambda x: x[1])
+                                                scores = reranker.predict(pairs)
+                                                combined = sorted(zip(ori_context, scores), key=lambda x: x[1], reverse=True)
                                                 ori_context = [con for con, score in combined]
                                             t_cons = []
                                             t_sour = []
