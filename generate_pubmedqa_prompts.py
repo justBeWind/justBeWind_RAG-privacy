@@ -4,14 +4,16 @@ from generate_prompt import get_prompt, get_executable_file
 from retrieval_database import construct_retrieval_database
 
 def main():
-    exp_name = 'pubmedqa'
+    exp_name = 'pubmedqa-v2'
     os.makedirs(f'Inputs&Outputs/{exp_name}', exist_ok=True)
     
-    # 1. Construct Retrieval Database for PubMedQA
-    # Note: preprocess_pubmedqa.py should be run first to create Data/pubmedqa
-    print("Building Vector Database for PubMedQA...")
-    construct_retrieval_database(['pubmedqa'], ['recursive_character'], 'bge-large-en-v1.5')
-    
+    # 1. Construct Retrieval Database for PubMedQA safely
+    db_path = './RetrievalBase/pubmedqa/bge-large-en-v1.5'
+    if not os.path.exists(db_path) or len(os.listdir(db_path)) == 0:
+        print("Vector Database for PubMedQA not found. Building now...")
+        construct_retrieval_database(['pubmedqa'], ['recursive_character'], 'bge-large-en-v1.5')
+    else:
+        print("Vector Database for PubMedQA already exists. Skipping Chroma construction to prevent duplication...")    
     # 2. Define Settings for PubMedQA Evaluation
     # We use Performance_pubmedqa to trigger the evaluation mode in generate_prompt.py
     settings = {
