@@ -486,8 +486,14 @@ if __name__ == '__main__':
             construct_retrieval_database([dataset_name, 'wikitext-103'],
                                          ['by_two_line_breaks', 'recursive_character'],
                                          encoder_model)
+        elif dataset_name.find('pubmedqa') != -1:
+            construct_retrieval_database([dataset_name, 'wikitext-103'],
+                                         ['recursive_character', 'recursive_character'],
+                                         encoder_model)
     else:
         if dataset_name.find('enron-mail') != -1:
             construct_retrieval_database([dataset_name], ['single_file'], encoder_model)
         elif dataset_name.find('chatdoctor') != -1:
             construct_retrieval_database([dataset_name], ['by_two_line_breaks'], encoder_model)
+        elif dataset_name.find('pubmedqa') != -1:
+            construct_retrieval_database([dataset_name], ['recursive_character'], encoder_model)

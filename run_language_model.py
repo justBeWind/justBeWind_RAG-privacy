@@ -190,6 +190,7 @@ def main(
         dp_beta: float = 1.0,
         baseline_only: bool = False,
         c_module_only: bool = False,
+        max_test_samples: int = -1,
 ):
     print(f"\n[INIT] Single-Model Inference started for path: {path}")
     if baseline_only:
@@ -209,6 +210,9 @@ def main(
     inputs_dir = f"./Inputs&Outputs/{path}"
     with open(os.path.join(inputs_dir, "prompts.json"), 'r', encoding='utf-8') as f:
         all_prompts = json.loads(f.read())
+        
+    if max_test_samples > 0:
+        all_prompts = all_prompts[:max_test_samples]
         
     print(f"[INIT] Loaded {len(all_prompts)} prompts. Starting generation...", flush=True)
     
