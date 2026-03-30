@@ -4,13 +4,17 @@ import argparse
 import os
 from transformers import AutoTokenizer
 
-def get_eps_step(beta, alpha, m):
+def get_eps_step(beta, alpha, m=1):
     """
-    Calculate the per-token RDP cost based on DP-Fusion formula.
+    Calculate the per-token RDP cost based on DP-Fusion formula (Theorem 4).
+    formula: eps = (1 / (alpha - 1)) * log( (m-1)/m + (1/m) * exp((alpha-1) * 4 * beta) )
     """
-    # term = (m-1)/m + (1/m) * exp((alpha-1) * 4 * beta)
+    if m == 1:
+        # Simplifies to 4 * beta for alpha accounting
+        return 4.0 * beta
+    
     arg = ((m - 1.0) / m) + (1.0 / m) * math.exp((alpha - 1.0) * 4.0 * beta)
-    return (1.0 / (alpha - 1.0)) * math.log(arg)
+    return (1.0 / (alpha - 1.0)) * math.log(max(arg, 1e-12))
 
 def calculate_epsilon(output_path, audit_path, ckpt_dir, delta=1e-5, dp_beta=1.0, m=1):
     """
@@ -47,12 +51,14 @@ def calculate_epsilon(output_path, audit_path, ckpt_dir, delta=1e-5, dp_beta=1.0
     
     using_realized = False
     all_sample_rdps = [] # Store per-token RDPs to re-calculate groups
+    all_token_counts = []
 
     # 1. Collect all raw divergences
     all_raw_divs = []
     for i in range(num_samples):
         text = output_data[i]
         token_count = len(tokenizer.encode(text, add_special_tokens=False)) if tokenizer else len(text)/4.0
+        all_token_counts.append(token_count)
         
         audit_entry = audit_data[i] if audit_data and i < len(audit_data) else None
         token_divs = audit_entry.get('b_module_token_divergences') if audit_entry else None
@@ -61,6 +67,7 @@ def calculate_epsilon(output_path, audit_path, ckpt_dir, delta=1e-5, dp_beta=1.0
             using_realized = True
             all_raw_divs.append(token_divs)
         else:
+            # If no audit file, generate a dummy array of max length to estimate theoretical bound
             all_raw_divs.append([dp_beta] * int(token_count))
 
     # 2. Sweep Alpha to find the minimum Total Epsilon
@@ -91,17 +98,22 @@ def calculate_epsilon(output_path, audit_path, ckpt_dir, delta=1e-5, dp_beta=1.0
             best_theoretical_epsilon = avg_theo_eps
             best_theoretical_alpha = alpha
 
+    avg_tokens = sum(all_token_counts) / num_samples if all_token_counts else 0
+
     print(f"Output File: {os.path.basename(output_path)}")
     print(f"Data Source: {'Audit File Found' if using_realized else 'No Audit File (Theoretical Only)'}")
     print(f"Number of Samples: {num_samples}")
+    print(f"Avg Answer Length: {avg_tokens:.1f} tokens")
     print(f"Target Delta: {delta}")
     
-    print(f"\n[Theoretical Privacy Guarantee]")
+    print(f"\n[Theoretical Privacy Guarantee (Worst Case)]")
+    print(f"Assumes each token reaches max divergence Beta={dp_beta}")
     print(f"Optimal Rényi Order (Alpha): {best_theoretical_alpha}")
     print(f"Average Bound Epsilon (Theoretical Limit): {best_theoretical_epsilon:.2f}")
 
     if using_realized:
         print(f"\n[Realized Privacy Cost (Data-Dependent)]")
+        print(f"Uses actually recorded divergences from B-Module")
         print(f"Optimal Rényi Order (Alpha): {best_alpha}")
         print(f"Average Consumed Epsilon (Actual Utility): {best_epsilon:.2f}")
 
