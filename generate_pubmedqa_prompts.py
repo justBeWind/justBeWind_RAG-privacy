@@ -25,10 +25,10 @@ def main():
             'data_name_list': [['pubmedqa']],
             'encoder_model_name': ['bge-large-en-v1.5'],
             'retrieve_method': ['knn'],
-            'retrieve_num': [2],
+            'retrieve_num': [3],
             'contexts_adhesive': ['\n\n'],
             'threshold': [-1],
-            'rerank': ['no'],
+            'rerank': ['yes'],
             'summarize': ['no'],
             'num_questions': 1000, # PubMedQA labeled has 1000 samples
             'max_context_length': 2048
@@ -39,7 +39,7 @@ def main():
         },
         'LLM': {
             'LLM model': ['meta-llama/Llama-2-7b-chat-hf'],
-            'temperature': [0.6],
+            'temperature': [0.1],
             'top_p': [0.9],
             'max_seq_len': [4096],
             'max_gen_len': [128] # Binary-ish answers are short

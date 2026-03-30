@@ -41,7 +41,9 @@ def calculate_epsilon(output_path, audit_path, ckpt_dir, delta=1e-5, dp_beta=1.0
     # We will test a range of alpha values to find the minimum global epsilon
     alphas = [1.1, 1.5, 2.0, 3.0, 4.0, 5.0, 8.0, 10.0, 16.0, 32.0, 64.0]
     best_epsilon = float('inf')
+    best_theoretical_epsilon = float('inf')
     best_alpha = 0
+    best_theoretical_alpha = 0
     
     using_realized = False
     all_sample_rdps = [] # Store per-token RDPs to re-calculate groups
@@ -64,28 +66,47 @@ def calculate_epsilon(output_path, audit_path, ckpt_dir, delta=1e-5, dp_beta=1.0
     # 2. Sweep Alpha to find the minimum Total Epsilon
     for alpha in alphas:
         total_eps_sum = 0
+        total_theo_eps_sum = 0
         accountant_term = math.log(1.0 / delta) / (alpha - 1.0)
         
         for sample_divs in all_raw_divs:
             sample_rdp = 0
+            sample_theo_rdp = 0
             for div in sample_divs:
                 # Use current alpha in the formula
                 sample_rdp += get_eps_step(div, alpha, m)
+                sample_theo_rdp += get_eps_step(dp_beta, alpha, m)
+                
             total_eps_sum += (sample_rdp + accountant_term)
+            total_theo_eps_sum += (sample_theo_rdp + accountant_term)
         
         avg_eps = total_eps_sum / num_samples
+        avg_theo_eps = total_theo_eps_sum / num_samples
+        
         if avg_eps < best_epsilon:
             best_epsilon = avg_eps
             best_alpha = alpha
+            
+        if avg_theo_eps < best_theoretical_epsilon:
+            best_theoretical_epsilon = avg_theo_eps
+            best_theoretical_alpha = alpha
 
     print(f"Output File: {os.path.basename(output_path)}")
-    print(f"Accounting Mode: {'DATA-DEPENDENT (REALIZED)' if using_realized else 'THEORETICAL (BOUND)'}")
+    print(f"Data Source: {'Audit File Found' if using_realized else 'No Audit File (Theoretical Only)'}")
     print(f"Number of Samples: {num_samples}")
-    
     print(f"Target Delta: {delta}")
-    print(f"Optimal Rényi Order (Alpha): {best_alpha}")
-    print(f"Total Experiment Epsilon (Optimized): {best_epsilon:.2f}")
+    
+    print(f"\n[Theoretical Privacy Guarantee]")
+    print(f"Optimal Rényi Order (Alpha): {best_theoretical_alpha}")
+    print(f"Average Bound Epsilon (Theoretical Limit): {best_theoretical_epsilon:.2f}")
+
+    if using_realized:
+        print(f"\n[Realized Privacy Cost (Data-Dependent)]")
+        print(f"Optimal Rényi Order (Alpha): {best_alpha}")
+        print(f"Average Consumed Epsilon (Actual Utility): {best_epsilon:.2f}")
+
     print(f"-----------------------------------------\n")
+
     
     return best_epsilon
 
