@@ -220,11 +220,12 @@ def main(
     audit_log = []
     ckpt_safe_name = ckpt_dir.split('/')[-1]
     
-    suffix = ""
     if baseline_only:
         suffix = "-baseline"
     elif c_module_only:
         suffix = "-c_only"
+    else:
+        suffix = f"-dp_{dp_alpha}_{dp_beta}"
 
     out_name = f"{inputs_dir}/outputs-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}{suffix}.json"
     audit_name = f"{inputs_dir}/audit-{ckpt_safe_name}-{temperature}-{top_p}-{max_seq_len}-{max_gen_len}{suffix}.json"
