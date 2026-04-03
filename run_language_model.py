@@ -43,7 +43,7 @@ def find_lambda_bisection(p_priv, p_pub, alpha, max_div, max_iter=20, tol=1e-5):
 # ── C Module v2: Typed Placeholder + E_query Filtering ──────────────────────
 # Allowed entity type labels (must match prompt exactly)
 ALLOWED_TYPES = {
-    "PERSON", "PHONE", "EMAIL", "ADDRESS",
+    "PERSON", "PHONE", "EMAIL", "ADDRESS", "AGE",
     "DISEASE", "MEDICATION", "TEST_RESULT", "DATE", "ID", "ORGANIZATION"
 }
 
@@ -63,17 +63,19 @@ Identify sensitive entities in the CONTEXT that should be protected.
 Output ONLY their exact text and type label. Do NOT paraphrase or generalize.
 
 ALLOWED TYPE LABELS (use EXACTLY one of these strings):
-PERSON, PHONE, EMAIL, ADDRESS, DISEASE, MEDICATION, TEST_RESULT, DATE, ID, ORGANIZATION
+PERSON, PHONE, EMAIL, ADDRESS, AGE, DISEASE, MEDICATION, TEST_RESULT, DATE, ID, ORGANIZATION
 
 RULES:
 1. Only flag entities NOT already mentioned in the user's QUERY (the user already knows those).
-2. Specific lab values with numbers are TEST_RESULT. Generic concepts ("blood pressure") are NOT entities.
-3. Output ONLY a valid JSON array: [{"entity": "exact text", "type": "TYPENAME"}, ...]
-4. If nothing to protect, output []"""
+2. DO NOT mask medical professional roles or titles (e.g., "neurosurgeon", "doctor", "specialist") unless they are specific proper names.
+3. Specific lab values with numbers are TEST_RESULT. Generic medical concepts ("blood pressure") are NOT entities.
+4. Identification must be EXHAUSTIVE: find every mention of the same entity to ensure full protection.
+5. Output ONLY a valid JSON array: [{"entity": "exact text", "type": "TYPENAME"}, ...]
+6. If nothing to protect, output []"""
 
     few_shot_query = "What should I do about my diabetes?"
-    few_shot_context = "Patient John (138-xxxx) was diagnosed with diabetes and prescribed metformin 500mg on Jan 5 at City Clinic."
-    few_shot_output = '[{"entity": "John", "type": "PERSON"}, {"entity": "138-xxxx", "type": "PHONE"}, {"entity": "metformin 500mg", "type": "MEDICATION"}, {"entity": "Jan 5", "type": "DATE"}, {"entity": "City Clinic", "type": "ORGANIZATION"}]'
+    few_shot_context = "Patient John (age 52, 138-xxxx) was diagnosed with diabetes and visited his neurosurgeon at City Clinic last Jan 5. John mentioned his metformin 500mg dose."
+    few_shot_output = '[{"entity": "John", "type": "PERSON"}, {"entity": "52", "type": "AGE"}, {"entity": "138-xxxx", "type": "PHONE"}, {"entity": "metformin 500mg", "type": "MEDICATION"}, {"entity": "Jan 5", "type": "DATE"}, {"entity": "City Clinic", "type": "ORGANIZATION"}]'
 
     messages = [
         {"role": "system", "content": system_prompt},

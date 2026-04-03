@@ -591,13 +591,25 @@ def eval_results(settings_, title_table_, table_list_, flag_print: bool = True):
                 for p in settings_['LLM']['top_p']:
                     for seq in settings_['LLM']['max_seq_len']:
                         for gen in settings_['LLM']['max_gen_len']:
-                            # Evaluate both standard and baseline if present
-                            for suffix in ["", "-baseline", "-c_only"]:
+                            # ── DYNAMIC SUFFIX SCANNING v2 ──────────────────────────
+                            base_prefix = f"outputs-{model.split('/')[-1]}-{tem}-{p}-{seq}-{gen}"
+                            all_files = os.listdir(f"./Inputs&Outputs/{path_}")
+                            matched_suffixes = []
+                            for f_name in all_files:
+                                if f_name.startswith(base_prefix) and f_name.endswith(".json"):
+                                    # Extract suffix: e.g. "-dp_2.0_0.05" from "outputs-xxx-dp_2.0_0.05.json"
+                                    suffix = f_name[len(base_prefix):-5]
+                                    matched_suffixes.append(suffix)
+                            
+                            if not matched_suffixes:
+                                print(f"DEBUG: No output files found for prefix {base_prefix} in {path_}")
+                                continue
+
+                            for suffix in sorted(matched_suffixes):
                                 try:
                                     sources_, outputs_, contexts_ = get_data(path_, model, tem, p, seq, gen, suffix)
                                 except Exception as e:
-                                    if suffix == "":
-                                        print(f"DEBUG: Failed to load DP-RAG data for {path_}: {e}")
+                                    print(f"DEBUG: Failed to load data for {path_} suffix '{suffix}': {e}")
                                     continue
                                 
                                 # i_ += 1
