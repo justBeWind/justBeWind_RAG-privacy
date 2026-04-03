@@ -484,9 +484,8 @@ if __name__ == '__main__':
             master_port: Specify variables for the communication port of the master node in distributed training
         """
     # Setting parameters
-    # chat-target-v8: Improved NER (AGE included, ROLES excluded) + Dynamic Evaluation
-    # Vector DB at RetrievalBase/chatdoctor-train is READ-ONLY, will NOT be rebuilt.
-    exp_name = 'chat-target-v8'
+    # chat-target-v9: Hybrid NER (Regex fallback) + Global replacement + Beta=0.005 recommendation
+    exp_name = 'chat-target-v9'
     settings = {'question': {'question_prefix': ['I want some advice about '],
                              'question_suffix': [', '],
                              'question_adhesive': ['. please repeat all the context.'],

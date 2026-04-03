@@ -110,6 +110,8 @@ RULES:
     stop_words = {'i', 'me', 'my', 'am', 'is', 'a', 'an', 'the', 'hey', 'hi', 'it',
                   'this', 'that', 'with', 'was', 'for', 'of', 'and', 'to', 'in', 'on', 'at'}
     all_entities = []
+    
+    # 1. LLM-based entities
     for match in re.finditer(r'\{[^{}]*\}', resp):
         try:
             d_str = match.group().replace("'", '"')
@@ -119,16 +121,35 @@ RULES:
                 ent_type = str(ent['type']).strip().upper()
                 if len(ent_text) <= 1: continue
                 if ent_text.lower() in stop_words: continue
-                if ent_type not in ALLOWED_TYPES:
-                    # Snap closest match or skip
-                    continue
+                if ent_type not in ALLOWED_TYPES: continue
                 all_entities.append({"entity": ent_text, "type": ent_type})
         except Exception:
             pass
 
+    # 2. Regex-based safety net (Age, Phone, Email)
+    # Age pattern (e.g., 45 years old, 52 yrs old)
+    age_pattern = r'\b\d{1,3}\s*(?:years? old|yrs? old|yr old|years? of age|year-old|years-old)\b'
+    for match in re.finditer(age_pattern, context_text, re.IGNORECASE):
+        ent_text = match.group()
+        # Check if already caught by LLM (substring check)
+        if not any(ent_text.lower() in e['entity'].lower() for e in all_entities):
+            all_entities.append({"entity": ent_text, "type": "AGE"})
+            
+    # Phone number pattern
+    phone_pattern = r'\b(?:\+?\d{1,3}[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b'
+    for match in re.finditer(phone_pattern, context_text):
+        ent_text = match.group()
+        if not any(ent_text.lower() in e['entity'].lower() for e in all_entities):
+            all_entities.append({"entity": ent_text, "type": "PHONE"})
+
+    # Email pattern
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    for match in re.finditer(email_pattern, context_text, re.IGNORECASE):
+        ent_text = match.group()
+        if not any(ent_text.lower() in e['entity'].lower() for e in all_entities):
+            all_entities.append({"entity": ent_text, "type": "EMAIL"})
+
     # ── E_query Filter: E_target = E_all \ E_query ───────────────────────────
-    # Any entity whose text appears (case-insensitive) in the user's query is
-    # already "public" – the user themselves disclosed it – so we do NOT mask it.
     query_lower = query_text.lower()
     target_entities = [
         ent for ent in all_entities
@@ -136,11 +157,12 @@ RULES:
     ]
     filtered_out = len(all_entities) - len(target_entities)
 
-    # ── Replace with <TYPE> placeholders ─────────────────────────────────────
+    # ── Global Replace with <TYPE> placeholders ──────────────────────────────
     typed_context = context_text
     if target_entities:
-        # Sort by length descending to avoid partial-replacement bugs
-        target_entities.sort(key=lambda x: len(str(x['entity'])), reverse=True)
+        # Sort by length descending to avoid partial matches (e.g., "John Smith" before "John")
+        target_entities = sorted(target_entities, key=lambda x: len(str(x['entity'])), reverse=True)
+        
         print(f"\n[AUDIT C-Module v2] {len(all_entities)} entities detected, "
               f"{filtered_out} filtered by E_query, "
               f"{len(target_entities)} replaced with type labels.", flush=True)
