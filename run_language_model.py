@@ -40,71 +40,121 @@ def find_lambda_bisection(p_priv, p_pub, alpha, max_div, max_iter=20, tol=1e-5):
     final_div = compute_renyi_divergence(final_mix, p_pub, alpha)
     return final_lambda, final_div.item()
 
-def get_safe_context(text, model, tokenizer, device):
-    messages = [
-        {"role": "system", "content": """You are a privacy anonymization assistant.
-Extract sensitive entities (names, meds, conditions, locations) and provide a NATURAL LANGUAGE generalization.
-Example generalizations: 'a patient', 'a medical condition', 'a care facility', 'the medication', 'a measured value'.
-IGNORE common English words and punctuation.
+# ── C Module v2: Typed Placeholder + E_query Filtering ──────────────────────
+# Allowed entity type labels (must match prompt exactly)
+ALLOWED_TYPES = {
+    "PERSON", "PHONE", "EMAIL", "ADDRESS",
+    "DISEASE", "MEDICATION", "TEST_RESULT", "DATE", "ID", "ORGANIZATION"
+}
 
-Format: JSON array [{"entity": "word", "type": "generalization"}]
-If no entities found, output []."""},
-        {"role": "user", "content": "Text: Hi, I am John. My GFR test at City Hospital was 45 mL/min."},
-        {"role": "assistant", "content": '[{"entity": "John", "type": "a patient"}, {"entity": "GFR", "type": "a blood test"}, {"entity": "City Hospital", "type": "a care facility"}, {"entity": "45 mL/min", "type": "a measured value"}]'},
-        {"role": "user", "content": f"Text: {text}"}
+def get_typed_placeholder_context(context_text: str, query_text: str, model, tokenizer, device):
+    """
+    New C Module: NER with typed placeholders.
+    Implements E_target = E_all - E_query:
+      - Identifies all private entities in context_text
+      - Filters out entities that already appear in query_text (user already knows them)
+      - Replaces remaining entities with <TYPE> labels (e.g., <PERSON>, <DISEASE>)
+    No semantic generalization is performed — raw type label only.
+    This deliberately creates an information gap that gives DP-Fusion (B module) a meaningful role.
+    """
+    # Build few-shot prompt
+    system_prompt = """You are a clinical privacy entity detector for RAG context sanitization.
+Identify sensitive entities in the CONTEXT that should be protected.
+Output ONLY their exact text and type label. Do NOT paraphrase or generalize.
+
+ALLOWED TYPE LABELS (use EXACTLY one of these strings):
+PERSON, PHONE, EMAIL, ADDRESS, DISEASE, MEDICATION, TEST_RESULT, DATE, ID, ORGANIZATION
+
+RULES:
+1. Only flag entities NOT already mentioned in the user's QUERY (the user already knows those).
+2. Specific lab values with numbers are TEST_RESULT. Generic concepts ("blood pressure") are NOT entities.
+3. Output ONLY a valid JSON array: [{"entity": "exact text", "type": "TYPENAME"}, ...]
+4. If nothing to protect, output []"""
+
+    few_shot_query = "What should I do about my diabetes?"
+    few_shot_context = "Patient John (138-xxxx) was diagnosed with diabetes and prescribed metformin 500mg on Jan 5 at City Clinic."
+    few_shot_output = '[{"entity": "John", "type": "PERSON"}, {"entity": "138-xxxx", "type": "PHONE"}, {"entity": "metformin 500mg", "type": "MEDICATION"}, {"entity": "Jan 5", "type": "DATE"}, {"entity": "City Clinic", "type": "ORGANIZATION"}]'
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"QUERY: {few_shot_query}\nCONTEXT: {few_shot_context}"},
+        {"role": "assistant", "content": few_shot_output},
+        {"role": "user", "content": f"QUERY: {query_text}\nCONTEXT: {context_text}"}
     ]
+
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     except Exception:
-        prompt = f"System: {messages[0]['content']}\n\nUser: {text}\n\nAssistant: ["
+        prompt = f"System: {system_prompt}\n\nUser: QUERY: {query_text}\nCONTEXT: {context_text}\n\nAssistant: ["
 
     if not prompt.strip().endswith("["):
         prompt += "["
 
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=512, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+        outputs = model.generate(
+            **inputs, max_new_tokens=512, do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
+        )
     resp_raw = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-    
+
     resp = "[" + resp_raw if not resp_raw.strip().startswith("[") else resp_raw
     if "]" not in resp:
         last_brace = resp.rfind("}")
         if last_brace != -1:
-            resp = resp[:last_brace+1] + "]"
+            resp = resp[:last_brace + 1] + "]"
 
-    safe_text = text
-    found_entities = []
-    
-    stop_words = {'i', 'me', 'my', 'am', 'is', 'a', 'an', 'the', 'hey', 'hi', 'it', 'doing', 'this', 'that', 'with', 'was', 'for', 'of', 'and', 'to', 'in', 'on', 'at'}
+    # ── Parse raw entity list from LLM output ────────────────────────────────
+    stop_words = {'i', 'me', 'my', 'am', 'is', 'a', 'an', 'the', 'hey', 'hi', 'it',
+                  'this', 'that', 'with', 'was', 'for', 'of', 'and', 'to', 'in', 'on', 'at'}
+    all_entities = []
     for match in re.finditer(r'\{[^{}]*\}', resp):
         try:
             d_str = match.group().replace("'", '"')
             ent = json.loads(d_str)
             if isinstance(ent, dict) and 'entity' in ent and 'type' in ent:
                 ent_text = str(ent['entity']).strip()
-                if len(ent_text) <= 1: continue 
-                if ent_text.lower() in stop_words: continue 
-                found_entities.append(ent)
+                ent_type = str(ent['type']).strip().upper()
+                if len(ent_text) <= 1: continue
+                if ent_text.lower() in stop_words: continue
+                if ent_type not in ALLOWED_TYPES:
+                    # Snap closest match or skip
+                    continue
+                all_entities.append({"entity": ent_text, "type": ent_type})
         except Exception:
             pass
-            
-    if found_entities:
-        found_entities.sort(key=lambda x: len(str(x['entity'])), reverse=True)
-        print(f"\n[AUDIT C-Module] Found {len(found_entities)} entities for semantic generalization.", flush=True)
-        for ent in found_entities:
+
+    # ── E_query Filter: E_target = E_all \ E_query ───────────────────────────
+    # Any entity whose text appears (case-insensitive) in the user's query is
+    # already "public" – the user themselves disclosed it – so we do NOT mask it.
+    query_lower = query_text.lower()
+    target_entities = [
+        ent for ent in all_entities
+        if str(ent['entity']).lower() not in query_lower
+    ]
+    filtered_out = len(all_entities) - len(target_entities)
+
+    # ── Replace with <TYPE> placeholders ─────────────────────────────────────
+    typed_context = context_text
+    if target_entities:
+        # Sort by length descending to avoid partial-replacement bugs
+        target_entities.sort(key=lambda x: len(str(x['entity'])), reverse=True)
+        print(f"\n[AUDIT C-Module v2] {len(all_entities)} entities detected, "
+              f"{filtered_out} filtered by E_query, "
+              f"{len(target_entities)} replaced with type labels.", flush=True)
+        for ent in target_entities:
             entity_text = str(ent['entity']).strip()
-            # Generalization is now a natural phrase
-            general_phrase = str(ent['type']).strip() 
+            placeholder = f"<{ent['type']}>"
             pattern = r'(?<![a-zA-Z0-9])' + re.escape(entity_text) + r'(?![a-zA-Z0-9])'
-            safe_text = re.sub(pattern, general_phrase, safe_text)
+            typed_context = re.sub(pattern, placeholder, typed_context, flags=re.IGNORECASE)
     else:
-        if "[]" in resp or "{}" not in resp:
-            print(f"\n[AUDIT C-Module] Success: No specific entities requiring redaction.")
+        if not all_entities:
+            print(f"\n[AUDIT C-Module v2] No sensitive entities found in context.", flush=True)
         else:
-            print(f"\n[AUDIT C-Module Warning] Heavy parsing failure. Fallback to Full Redaction.", flush=True)
-            safe_text = "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]"
-            
-    return safe_text, found_entities
+            print(f"\n[AUDIT C-Module v2] All {len(all_entities)} entities were in query (E_query). "
+                  f"Context unchanged.", flush=True)
+
+    return typed_context, target_entities
 
 def dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=2.0, max_div=1.0):
     eos_id = tokenizer.eos_token_id
@@ -196,9 +246,9 @@ def main(
     if baseline_only:
         print("Mode: BASELINE RAG (No Privacy Protection)")
     elif c_module_only:
-        print("Mode: C-MODULE ONLY (Semantic Generalization Baseline)")
+        print("Mode: C-MODULE ONLY (Typed Placeholder, v2)")
     else:
-        print(f"Mode: DP-RAG (Alpha: {dp_alpha}, Beta: {dp_beta})", flush=True)
+        print(f"Mode: DP-RAG with Typed Placeholder C-Module (Alpha: {dp_alpha}, Beta: {dp_beta})", flush=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[INIT] Loading HuggingFace model: {ckpt_dir} on {device}...", flush=True)
@@ -252,46 +302,63 @@ def main(
             status = "BASELINE"
             prompt_pub = prompt_priv # In baseline, public prompt is the same as private
         else:
-            # DP-RAG: C-Module + B-Module
+            # DP-RAG: C-Module (Typed Placeholder + E_query Filter) + B-Module
             start_marker = "context: "
             end_marker = "\nquestion: "
             start_idx = prompt_priv.find(start_marker)
-            
+
+            # Extract query text for E_query filtering (E_target = E_all \ E_query)
+            question_marker = "question: "
+            q_start = prompt_priv.find(question_marker)
+            if q_start != -1:
+                q_start += len(question_marker)
+                # Question ends at the next blank line or answer prompt
+                q_end = prompt_priv.find("\n", q_start)
+                query_str = prompt_priv[q_start:q_end].strip() if q_end != -1 else prompt_priv[q_start:].strip()
+            else:
+                query_str = ""
+
             if start_idx != -1 and (end_idx := prompt_priv.find(end_marker, start_idx)) != -1:
                 start_idx += len(start_marker)
                 context_str = prompt_priv[start_idx:end_idx]
-                safe_context, c_entities = get_safe_context(context_str, model, tokenizer, device)
-                prompt_pub = prompt_priv[:start_idx] + safe_context + prompt_priv[end_idx:]
+                typed_context, c_entities = get_typed_placeholder_context(
+                    context_str, query_str, model, tokenizer, device
+                )
+                prompt_pub = prompt_priv[:start_idx] + typed_context + prompt_priv[end_idx:]
             else:
-                prompt_pub, c_entities = get_safe_context(prompt_priv, model, tokenizer, device)
-                
+                # Fallback: treat entire prompt as context
+                typed_context, c_entities = get_typed_placeholder_context(
+                    prompt_priv, query_str, model, tokenizer, device
+                )
+                prompt_pub = typed_context
+
             if c_module_only:
-                # C-Module Only: Standard generation on the generalized prompt
+                # C-Module Only: Standard generation on the typed-placeholder prompt
                 inputs = tokenizer(prompt_pub, return_tensors="pt").to(device)
                 with torch.no_grad():
                     outputs = model.generate(
-                        **inputs, 
-                        max_new_tokens=max_gen_len, 
-                        temperature=temperature, 
-                        top_p=top_p, 
+                        **inputs,
+                        max_new_tokens=max_gen_len,
+                        temperature=temperature,
+                        top_p=top_p,
                         do_sample=(temperature > 0),
                         pad_token_id=tokenizer.eos_token_id
                     )
                 ans = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
                 avg_lam = 1.0
                 divs = []
-                status = "C_MODULE_ONLY"
+                status = "C_MODULE_ONLY_TYPED"
             else:
-                # Full DP-RAG (B + C)
-                ans, avg_lam, divs = dp_fusion_generate(model, tokenizer, prompt_priv, prompt_pub, device, max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta)
-                
+                # Full DP-RAG: B-Module (DP-Fusion) on D_priv vs D_pub (typed placeholder)
+                ans, avg_lam, divs = dp_fusion_generate(
+                    model, tokenizer, prompt_priv, prompt_pub, device,
+                    max_gen_len, temperature, top_p, alpha=dp_alpha, max_div=dp_beta
+                )
+
                 if c_entities:
-                    status = "SUCCESS"
+                    status = "SUCCESS_TYPED"
                 else:
-                    if "[REDACTED_CONTEXT_DUE_TO_PARSE_ERROR]" in prompt_pub:
-                        status = "FALLBACK_REDACTED"
-                    else:
-                        status = "NO_ENTITIES_SAFE"
+                    status = "NO_ENTITIES_FOUND"
 
         end_time = time.time()
         gen_time = end_time - start_time
