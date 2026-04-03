@@ -126,11 +126,18 @@ def get_data(path, ckpt_dir, temperature, top_p, max_seq_len, max_gen_len, suffi
     if type(sources[0]) is list:
         sources = [item for sublist in sources for item in sublist]
 
-    k = len(sources) // len(outputs)
-    assert len(question) == len(outputs)
-    assert len(question) == len(prompts)
-    assert len(sources) == len(contexts)
-    assert len(contexts) == len(prompts) * k
+    # ── Support for Pilot Experiments (Truncate to match output length) ──────
+    n = len(outputs)
+    # Determine the actual retrieval top-k used
+    num_full_prompts = len(prompts)
+    k = len(contexts) // num_full_prompts
+    
+    # Truncate metadata to match the subset of prompts actually run
+    prompts = prompts[:n]
+    question = question[:n]
+    sources = sources[:n * k]
+    contexts = contexts[:n * k]
+    
     return sources, outputs, contexts
 
 
