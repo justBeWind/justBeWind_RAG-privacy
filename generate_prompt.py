@@ -484,7 +484,9 @@ if __name__ == '__main__':
             master_port: Specify variables for the communication port of the master node in distributed training
         """
     # Setting parameters
-    exp_name = 'chat-target'
+    # chat-target-v7: retrieve_num=3, rerank=yes, temperature=0.1
+    # Vector DB at RetrievalBase/chatdoctor-train is READ-ONLY, will NOT be rebuilt.
+    exp_name = 'chat-target-v7'
     settings = {'question': {'question_prefix': ['I want some advice about '],
                              'question_suffix': [', '],
                              'question_adhesive': ['. please repeat all the context.'],
@@ -493,10 +495,10 @@ if __name__ == '__main__':
                 'retrival': {'data_name_list': [['chatdoctor-train']],
                              'encoder_model_name': ['bge-large-en-v1.5'],
                              'retrieve_method': ['knn'],
-                             'retrieve_num': [2],
+                             'retrieve_num': [3],
                              'contexts_adhesive': ['\n\n'],
                              'threshold': [-1],
-                             'rerank': ['no'],
+                             'rerank': ['yes'],
                              'summarize': ['no'],
                              'num_questions': 250,
                              'max_context_length': 2048
@@ -504,7 +506,7 @@ if __name__ == '__main__':
                 'template': {'suffix': [['context: ', 'question: ', 'answer:']],
                              'template_adhesive': ['\n']},
                 'LLM': {'LLM model': ['meta-llama/Llama-2-7b-chat-hf'],
-                        'temperature': [0.6],
+                        'temperature': [0.1],
                         'top_p': [0.9],
                         'max_seq_len': [4096],
                         'max_gen_len': [256]}
